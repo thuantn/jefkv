@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-Third-Party Method & Model Attributions:
-- AtlasKV (Huang et al., ICLR 2026): https://arxiv.org/abs/2510.17934 | https://github.com/HKUST-KnowComp/AtlasKV
-- KBLaM (Wang et al., 2024): https://arxiv.org/abs/2410.10450
-- Decision-Jef-0.1 (BarraHome, 2026): https://huggingface.co/BarraHome/Decision-Jef-0.1
-- mmBERT (Marone et al., 2025): https://arxiv.org/abs/2509.06888 | https://huggingface.co/jhu-clsp/mmBERT-base
-- ModernBERT (Warner et al., ACL 2025): https://aclanthology.org/2025.acl-long.127/
-- all-MiniLM-L6-v2 (Wang et al., NeurIPS 2020; Reimers & Gurevych, 2019): https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
-- BGE M3-Embedding (Chen et al., 2024): https://arxiv.org/abs/2402.03216 | https://huggingface.co/BAAI/bge-m3
