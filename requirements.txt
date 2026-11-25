@@ -1,0 +1,11 @@
+# Versions the CPU smoke test passed with (24/11/2026). The attention wrapper depends on
+# ModernBERT internals, so keep transformers pinned; decision-jef needs transformers >= 5.
+torch>=2.4
+transformers==5.24.0
+decision-jef==0.8.1
+sentence-transformers==6.3.0
+rank-bm25==0.2.2
+scikit-learn>=1.4
+matplotlib>=3.8
+numpy>=1.26
+tqdm>=4.66

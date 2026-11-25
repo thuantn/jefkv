@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+data/processed/
+data/fresh/
+runs/
+outputs/
+*.pt
+*.safetensors
+.DS_Store
+data/smoke/
+runs_smoke/
+outputs_smoke/
+docs/*.pdf
+runs_smoke.log
+
+# Personal working notes (local paths, account names): never public
+CLAUDE.md
+LESSONS_LEARNED.md
+docs/LESSONS_ARCHIVE_*.md
+*.log
+runs_modal/
+runs_colab/

@@ -1,0 +1,225 @@
+"""
+Train JefKV (or a RAG / hybrid baseline with the same budget) on data/processed/train.json.
+
+Schedule follows AtlasKV (Huang et al., ICLR 2026, Appendix A.1 & E): AdamW, cosine LR, sub-KG
+curriculum 10 -> 120 triples (+4 every 100 steps), --random_kv for the RandomKV check.
+
+Modes
+  kv      KG memory in attention only (trainable: KG heads + temperature)
+  rag     retrieved triple sentences in the state (trainable: top --unfreeze_top encoder layers)
+  hybrid  both (trainable: KG heads + temperature)
+"""
+
+import argparse
+import json
+import math
+import random
+import time
+from pathlib import Path
+
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
+
+from jefkv.memory import DenseRetriever, KGMemory, minilm_encoder, triple_text
+from jefkv.model import JefKVModel
+
+
+def amp_dtype(device: str, amp: str) -> torch.dtype:
+    if device != "cuda" or amp == "fp32":
+        return torch.float32
+    if amp == "auto":  # T4 (sm75) has no real bf16
+        return torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    return {"fp16": torch.float16, "bf16": torch.bfloat16}[amp]
+
+
+def build_memory(model: JefKVModel, triples, encoder: str, device: str, dtype, max_slots: int) -> KGMemory:
+    if encoder == "minilm":  # faithful AtlasKV KG2KV baseline
+        return KGMemory(triples, minilm_encoder(device), device, dtype, atlaskv_kv=True)
+    enc = lambda texts, max_len=max_slots: model.encode_kg_texts(texts, max_len)
+    return KGMemory(triples, enc, device, dtype)
+
+
+def rag_contexts(retriever, samples, k):
+    return [" ".join(triple_text(retriever.triples[i]) for i in retriever.search(s["state"], k)[0]) for s in samples]
+
+
+def decision_loss(logits, labels, present):
+    """Per-sample mean: CE when the rule exists, KL to 50/50 when it is missing."""
+    lp = F.log_softmax(logits, -1)
+    ce = -lp.gather(1, labels[:, None]).squeeze(1)
+    kl = (0.5 * (torch.log(torch.tensor(0.5, device=lp.device)) - lp)).sum(-1)
+    return torch.where(present, ce, kl).mean()
+
+
+def retrieval_loss(triple_logits, batch, sub_ids):
+    """Mean of -log P(g) over every gold triple g (a multi-rule case needs BOTH rules), per layer."""
+    pos = {g: j for j, g in enumerate(sub_ids)}
+    pairs = [(b, pos[g]) for b, s in enumerate(batch) for g in s["gold_idx"]]
+    if not pairs or not triple_logits:
+        return None
+    b_idx = torch.tensor([b for b, _ in pairs], device=next(iter(triple_logits.values())).device)
+    g_idx = torch.tensor([g for _, g in pairs], device=b_idx.device)
+    losses = []
+    for tl in triple_logits.values():
+        ok = tl[b_idx, g_idx] > -1e30  # gold among the triples this layer attended (top-k routing)
+        if ok.any():
+            losses.append(-F.log_softmax(tl, -1)[b_idx[ok], g_idx[ok]].mean())
+    return torch.stack(losses).mean() if losses else None
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--data", default="data/processed/train.json")
+    p.add_argument("--mode", choices=["kv", "rag", "hybrid"], default="kv")
+    p.add_argument("--kv_encoder", choices=["jef", "minilm"], default="jef")
+    p.add_argument("--random_kv", action="store_true")
+    p.add_argument("--save_dir", default="runs/kv_s0")
+    p.add_argument("--steps", type=int, default=3000)
+    p.add_argument("--batch_size", type=int, default=10)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--enc_lr", type=float, default=2e-5, help="LR for unfrozen encoder layers (rag).")
+    p.add_argument("--min_lr_ratio", type=float, default=0.01)
+    p.add_argument("--warmup", type=int, default=200, help="linear LR warmup steps, all modes (~7%% of 3000 steps, not tuned; 0 = none, as in gate 7)")
+    p.add_argument("--unfreeze_top", type=int, default=-1, help="-1 = auto: 2 for rag, 0 otherwise.")
+    p.add_argument("--aux_weight", type=float, default=0.5)
+    p.add_argument("--rag_k", type=int, default=3)
+    p.add_argument("--max_slots", type=int, default=16)
+    p.add_argument("--init_kg_size", type=int, default=4)  # AtlasKV App A.1: 4, +4 / 100 steps, max 120
+    p.add_argument("--kg_step_inc", type=int, default=4)
+    p.add_argument("--max_kg_size", type=int, default=120)
+    p.add_argument("--amp", choices=["auto", "fp16", "bf16", "fp32"], default="auto")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--freeze_kg_v", action="store_true", help="keep W_V^kg at its init (the layer's own W_V)")
+    p.add_argument("--restart_on_collapse", type=int, default=0,
+                   help="max restarts (new seed) when the run is stuck at 50/50 at --collapse_check; 0 = off")
+    p.add_argument("--collapse_check", type=int, default=1500)
+    p.add_argument("--collapse_margin", type=float, default=0.1,
+                   help="collapsed if the EMA of |logit margin| on rule-present training cases is below this")
+    args = p.parse_args()
+    if args.unfreeze_top < 0:
+        args.unfreeze_top = 2 if args.mode == "rag" else 0
+    args.seed_requested, args.restarts, args.collapsed_at_check = args.seed, 0, None
+    while not train_once(args):
+        # Frozen-Jef runs sometimes fall into an "always 50/50" solution early and never leave it (README,
+        # "Training collapse"). It shows on training batches only (no eval data), so restart with a new seed.
+        args.restarts += 1
+        args.seed = args.seed_requested + 1000 * args.restarts
+        print(f"collapsed at step {args.collapse_check}: restart {args.restarts} with seed {args.seed}")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def train_once(args) -> bool:
+    """One training run; False if --restart_on_collapse is on, restarts remain and the run collapsed."""
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dt = amp_dtype(device, args.amp)
+    torch.manual_seed(args.seed)
+    rng = random.Random(args.seed)
+
+    data = json.loads(Path(args.data).read_text(encoding="utf-8"))
+    samples, triples = data["samples"], data["triples"]
+
+    use_kv = args.mode in ("kv", "hybrid")
+    kg_dim = 384 if args.kv_encoder == "minilm" else 768
+    model = JefKVModel(kg_embed_dim=kg_dim, use_kv=use_kv, unfreeze_top=args.unfreeze_top, device=device,
+                       freeze_kg_v=args.freeze_kg_v)
+
+    memory = None
+    if use_kv:
+        memory = build_memory(model, triples, args.kv_encoder, device, dt if device == "cuda" else torch.float32, args.max_slots)
+        if args.random_kv:
+            memory.shuffle_values(args.seed)
+    retriever = DenseRetriever(triples, device) if args.mode in ("rag", "hybrid") else None
+
+    # Encoder weights (top layers and final_norm when unfrozen) at enc_lr; final_norm used to get lr (50x).
+    enc_params = [p for n, p in model.named_parameters() if p.requires_grad and n.startswith(("jef.encoder.layers", "jef.encoder.final_norm"))
+                  and ".attn.kg_" not in n]
+    enc_ids = {id(p) for p in enc_params}
+    new_params = [p for p in model.parameters() if p.requires_grad and id(p) not in enc_ids]
+    groups = [g for g in ({"params": new_params, "lr": args.lr}, {"params": enc_params, "lr": args.enc_lr}) if g["params"]]
+    for g in groups:
+        g["base_lr"] = g["lr"]
+    opt = torch.optim.AdamW(groups, weight_decay=0.01)
+    scaler = torch.amp.GradScaler(enabled=(dt == torch.float16))
+    n_train = sum(p.numel() for g in groups for p in g["params"])
+    print(f"mode={args.mode} kv_encoder={args.kv_encoder} random_kv={args.random_kv} trainable={n_train:,} amp={dt}")
+
+    save = Path(args.save_dir)
+    save.mkdir(parents=True, exist_ok=True)
+    model.train()
+    ema, ema_margin, t0 = None, None, time.time()
+    with (save / "train_log.jsonl").open("a" if args.restarts else "w", encoding="utf-8") as log:  # restarts append
+        for step in tqdm(range(1, args.steps + 1), desc=save.name):
+            frac = 0.5 * (1 + math.cos(math.pi * (step - 1) / max(1, args.steps - 1)))
+            # Linear warmup: damps Adam's first steps (each moves all 11M adapter weights by ~lr). It changed which
+            # seeds collapse to 50/50 but did not stop collapses (README, "Training collapse").
+            warm = min(1.0, step / args.warmup) if args.warmup > 0 else 1.0
+            for g in opt.param_groups:
+                g["lr"] = g["base_lr"] * warm * (args.min_lr_ratio + (1 - args.min_lr_ratio) * frac)
+
+            batch = rng.choices(samples, k=args.batch_size)
+            kg, sub_ids = None, None
+            if memory is not None:
+                # Curriculum size = number of distractors (always added on top of the batch's gold
+                # triples, so retrieval is never trivial even when a batch has many gold rules).
+                if args.unfreeze_top and args.kv_encoder == "jef" and step % 100 == 1 and step > 1:
+                    # Trainable top layers change the states the KG keys are made of: re-encode so the
+                    # keys seen in training match the ones eval builds from the trained weights.
+                    memory = build_memory(model, triples, args.kv_encoder, device, dt if device == "cuda" else torch.float32, args.max_slots)
+                    if args.random_kv:
+                        memory.shuffle_values(args.seed)
+                size = min(args.max_kg_size, args.init_kg_size + (step // 100) * args.kg_step_inc)
+                gold = {g for s in batch for g in s["gold_idx"]}
+                pool = [i for i in range(len(memory)) if i not in gold]
+                sub_ids = list(gold) + rng.sample(pool, min(size, len(pool)))
+                rng.shuffle(sub_ids)
+                kg = memory.subset(torch.tensor(sub_ids, device=device))
+            ctx = rag_contexts(retriever, batch, args.rag_k) if retriever else None
+            packed = model.batch(batch, ctx)
+            labels = torch.tensor([s["label"] for s in batch], device=device)
+            present = torch.tensor([s["rule_present"] for s in batch], device=device)
+
+            with torch.autocast(device_type=device, dtype=dt, enabled=(dt != torch.float32)):
+                logits, tl, _ = model(packed, kg)
+            dec = decision_loss(logits, labels, present)
+            # Frozen scorers (selecting layer: Q/K at identity) get no gradient from the aux loss;
+            # keeping them would only dilute the other layers' terms.
+            # With routing, only the selecting layer retrieves; aux on later layers taught them to match the
+            # triple's NAME (gate 5 probe: entity -> head <=45%, tail <=2%), so they learn from the decision only.
+            tl = {i: x for i, x in tl.items() if model.kg_modules[i].kg_q_proj.weight.requires_grad
+                  and (model.kg_modules[i].select_k or not any(m.select_k for m in model.kg_modules.values()))}
+            aux = retrieval_loss(tl, batch, sub_ids) if sub_ids else None
+            loss = dec + args.aux_weight * aux if aux is not None else dec
+
+            opt.zero_grad(set_to_none=True)
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
+            torch.nn.utils.clip_grad_norm_([p for g in groups for p in g["params"]], 1.0)
+            scaler.step(opt)
+            scaler.update()
+
+            ema = loss.item() if ema is None else 0.95 * ema + 0.05 * loss.item()
+            if present.any():
+                m = (logits[present, 1] - logits[present, 0]).float().abs().mean().item()
+                ema_margin = m if ema_margin is None else 0.98 * ema_margin + 0.02 * m
+            if step == args.collapse_check:  # recorded even without restarts, so tables can count collapses
+                args.collapsed_at_check = ema_margin is not None and ema_margin < args.collapse_margin
+                if args.collapsed_at_check and args.restarts < args.restart_on_collapse:
+                    log.write(json.dumps({"step": step, "collapsed": True, "ema_margin": ema_margin}) + "\n")
+                    return False
+            if step % 20 == 0 or step == 1:
+                rec = {"step": step, "loss": loss.item(), "ema_loss": ema, "dec_loss": dec.item(), "ema_margin": ema_margin,
+                       "aux_loss": None if aux is None else aux.item(), "kg_size": None if kg is None else len(sub_ids),
+                       "random_kv": args.random_kv, "secs": round(time.time() - t0, 1)}
+                log.write(json.dumps(rec) + "\n")
+                log.flush()
+
+    torch.save({"args": vars(args), "state": model.trainable_state()}, save / "adapter.pt")
+    print(f"saved {save / 'adapter.pt'} after {time.time() - t0:.0f}s")
+    return True
+
+
+if __name__ == "__main__":
+    main()
