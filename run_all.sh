@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|confirm_lr|fresh|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|confirm_lr|seeds_lr|fresh|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
 #   probe  instrumented pair, same recipe: hybrid s1 (collapses) vs s3 (does not), probe() every 25 steps, ckpt at 1000
 #   confirm_lr  LR 3e-4 on hybrid s0, s2 and randomkv s0, s1 (completes a 3x3 matrix with screen_lr)
+#   seeds_lr  seeds 3-5 of kv_jef / randomkv / hybrid with LR 3e-4 (6 seeds per config with screen_lr + confirm_lr)
 #   screen_lr / screen_fkv  collapse fixes, one factor each: adapter lr 3e-4 | --freeze_kg_v (kv s0-2, randomkv s2, hybrid s1)
 #   fresh  every trained adapter on a fresh test set (seed 7, no shared names) + no-warmup RAG runs
 #   smoke  tiny CPU check that every code path runs (minutes)
@@ -14,7 +15,7 @@
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|confirm_lr|fresh|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|confirm_lr|seeds_lr|fresh|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -88,11 +89,12 @@ if [ "$STAGE" = restart ]; then  # the two runs that collapsed with warmup, with
   exit 0
 fi
 
-if [ "$STAGE" = seeds ]; then  # extra seeds of every frozen-Jef config: does warmup remove the 50/50 collapse?
+if [ "$STAGE" = seeds ] || [ "$STAGE" = seeds_lr ]; then  # extra seeds of every frozen-Jef config: how often does it collapse?
+  if [ "$STAGE" = seeds_lr ]; then t=_lr3e4; f="--lr 3e-4"; else t=; f=; fi
   for s in 3 4 5; do
-    train_eval kv_jef_s$s --mode kv --seed $s
-    train_eval kv_jef_randomkv_s$s --mode kv --random_kv --seed $s
-    train_eval hybrid_s$s --mode hybrid --seed $s
+    train_eval kv_jef${t}_s$s --mode kv --seed $s $f
+    train_eval kv_jef_randomkv${t}_s$s --mode kv --random_kv --seed $s $f
+    train_eval hybrid${t}_s$s --mode hybrid --seed $s $f
   done
   exit 0
 fi
