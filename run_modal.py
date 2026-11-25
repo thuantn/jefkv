@@ -1,4 +1,4 @@
-"""Run a stage of run_all.sh on a Modal T4 (alternative to Kaggle).
+"""Run a stage of run_all.sh on a Modal T4 (alternative to free Colab).
 
     MODAL_TOKEN_ID=... MODAL_TOKEN_SECRET=... modal run run_modal.py --stage gate
     modal volume get jefkv-runs / runs_modal        # fetch runs/*, incl. _outputs/ (table + plots)

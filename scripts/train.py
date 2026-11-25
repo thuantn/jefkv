@@ -52,6 +52,50 @@ def decision_loss(logits, labels, present):
     return torch.where(present, ce, kl).mean()
 
 
+PROBE_COS_LAYERS, PROBE_RATIO_LAYERS = (11, 21), (6, 18, 21)
+
+
+@torch.no_grad()
+def probe(model: JefKVModel, packed, labels, kg, device: str, dt) -> dict:
+    """Diagnostics on a fixed batch of rule-present training cases (no grad, no RNG, so training is unchanged):
+    |margin| and accuracy with and without the KG, mean pairwise cosine of the [DEC] state across cases
+    (layers 11 and 21; 1.00 = every case looks the same), median ||y_kg|| / ||y_seq|| at [DEC] (KV layers 6, 18, 21)
+    and the mean temperature factor."""
+    rows = torch.arange(labels.shape[0], device=labels.device)
+    dec = packed.dec_pos  # one question per case: dec_pos[b] is case b's [DEC] position
+    hidden, layers = {}, model.jef.encoder.layers
+    hooks = [layers[i].register_forward_hook(lambda m, inp, out, i=i: hidden.__setitem__(i, out[0] if isinstance(out, tuple) else out))
+             for i in PROBE_COS_LAYERS]
+    kvm = {i: model.kg_modules[i] for i in PROBE_RATIO_LAYERS if i in model.kg_modules}
+    for m in kvm.values():
+        m.debug = {}
+    amp = torch.autocast(device_type=device, dtype=dt, enabled=(dt != torch.float32))
+    try:
+        with amp:
+            lg = model(packed, kg)[0].float()
+        out = {"temp": model.last_temp.float().mean().item()}
+        for i, h in hidden.items():
+            x = F.normalize(h[rows, dec].float(), dim=-1)
+            c = x @ x.T
+            out[f"cos_dec_l{i}"] = ((c.sum() - c.trace()) / (len(x) * (len(x) - 1))).item()
+        for i, m in kvm.items():
+            ys = m.debug["y_seq"][rows, :, dec].flatten(1).norm(dim=-1)
+            yk = m.debug["y_kg"][rows, :, dec].flatten(1).norm(dim=-1)
+            out[f"kg_seq_l{i}"] = (yk / ys.clamp(min=1e-8)).median().item()
+    finally:
+        for h in hooks:
+            h.remove()
+        for m in kvm.values():
+            m.debug = None
+    with amp:
+        lg0 = model(packed, None)[0].float()
+    for tag, x in (("kg", lg), ("nokg", lg0)):
+        d = x[:, 1] - x[:, 0]
+        out[f"margin_{tag}"] = d.abs().mean().item()
+        out[f"acc_{tag}"] = ((d > 0).long() == labels).float().mean().item()
+    return out
+
+
 def retrieval_loss(triple_logits, batch, sub_ids):
     """Mean of -log P(g) over every gold triple g (a multi-rule case needs BOTH rules), per layer."""
     pos = {g: j for j, g in enumerate(sub_ids)}
@@ -93,6 +137,10 @@ def main():
     p.add_argument("--freeze_kg_v", action="store_true", help="keep W_V^kg at its init (the layer's own W_V)")
     p.add_argument("--restart_on_collapse", type=int, default=0,
                    help="max restarts (new seed) when the run is stuck at 50/50 at --collapse_check; 0 = off")
+    p.add_argument("--probe_every", type=int, default=0,
+                   help="every N steps log probe() on a fixed batch of 32 training cases (0 = off)")
+    p.add_argument("--ckpt_at", type=int, nargs="*", default=[],
+                   help="also save adapter + optimizer + data-order RNG at these steps (ckpt_<step>.pt)")
     p.add_argument("--collapse_check", type=int, default=1500)
     p.add_argument("--collapse_margin", type=float, default=0.1,
                    help="collapsed if the EMA of |logit margin| on rule-present training cases is below this")
@@ -145,6 +193,15 @@ def train_once(args) -> bool:
     scaler = torch.amp.GradScaler(enabled=(dt == torch.float16))
     n_train = sum(p.numel() for g in groups for p in g["params"])
     print(f"mode={args.mode} kv_encoder={args.kv_encoder} random_kv={args.random_kv} trainable={n_train:,} amp={dt}")
+
+    probe_batch = None
+    if args.probe_every and memory is not None:
+        prng = random.Random(4242)  # its own RNG: probing must not change the training batches
+        ps = prng.sample([s for s in samples if s["rule_present"] and s["gold_idx"]], 32)
+        pgold = sorted({g for s in ps for g in s["gold_idx"]})
+        pids = pgold + prng.sample([i for i in range(len(memory)) if i not in set(pgold)], 120)
+        probe_batch = (model.batch(ps, rag_contexts(retriever, ps, args.rag_k) if retriever else None),
+                       torch.tensor([s["label"] for s in ps], device=device), torch.tensor(pids, device=device))
 
     save = Path(args.save_dir)
     save.mkdir(parents=True, exist_ok=True)
@@ -215,6 +272,13 @@ def train_once(args) -> bool:
                        "random_kv": args.random_kv, "secs": round(time.time() - t0, 1)}
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
+            if probe_batch is not None and (step % args.probe_every == 0 or step == 1):
+                pk, pl, pids = probe_batch
+                log.write(json.dumps({"step": step, "probe": probe(model, pk, pl, memory.subset(pids), device, dt)}) + "\n")
+                log.flush()
+            if step in args.ckpt_at:
+                torch.save({"args": vars(args), "step": step, "state": model.trainable_state(), "opt": opt.state_dict(),
+                            "scaler": scaler.state_dict(), "rng": rng.getstate()}, save / f"ckpt_{step}.pt")
 
     torch.save({"args": vars(args), "state": model.trainable_state()}, save / "adapter.pt")
     print(f"saved {save / 'adapter.pt'} after {time.time() - t0:.0f}s")

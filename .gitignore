@@ -23,3 +23,4 @@ docs/LESSONS_ARCHIVE_*.md
 *.log
 runs_modal/
 runs_colab/
+.vscode/

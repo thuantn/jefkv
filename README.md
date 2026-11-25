@@ -2,7 +2,7 @@
 
 **JefKV** is a personal research proof-of-concept. It asks whether **AtlasKV-style parametric KG memory** (Huang et al., ICLR 2026) helps a compact, bidirectional **System-1 decision model**, [Decision-Jef-0.1](https://huggingface.co/BarraHome/Decision-Jef-0.1) (307M, mmBERT-base / ModernBERT), decide rule-dependent cases, and where it does better or worse than plain retrieval-augmented prompting (RAG). It is an independent project, not affiliated with or endorsed by the authors of Decision-Jef or AtlasKV.
 
-> **Status:** 3-seed results for every configuration and seeds 3–5 for the frozen-Jef ones (T4). Two fixes for the training collapse and a re-evaluation on a fresh test set are running; this README will be updated with them. Numbers in "Changes" are from development gate runs.
+> **Status:** 3-seed results for every configuration and seeds 3–5 for the frozen-Jef ones (T4). The training collapse is still open (see "Training collapse"); an instrumented run and a re-evaluation on a fresh test set are pending, and this README will be updated with them. Numbers in "Changes" are from development gate runs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/results_dark.svg">
@@ -16,7 +16,7 @@
 
 ## Research questions
 
-1. **Retrieval inside a bidirectional encoder.** Does separated-softmax KV memory work inside a frozen ModernBERT, and which global layer retrieves? Checked with the RandomKV control (AtlasKV Appendix E) and per-layer ACC@1/5.
+1. **Retrieval inside a bidirectional encoder.** Does AtlasKV-style KV memory work inside a frozen ModernBERT, and which global layer retrieves? Checked with the RandomKV control (AtlasKV Appendix E) and per-layer ACC@1/5.
 2. **KV memory vs. RAG, on the same budget.** Which wins, and on which kind of case: single rule, rules that must be **combined**, entity names written in a **different surface form**, and **missing** rules?
 3. **Knowing when the rule is missing.** When no rule matches, does the model fall back towards 50%, or stay confidently wrong? Measured as confidence on the trap split and the abstention AUROC (confidence separating rule-present from rule-missing cases).
 
@@ -88,12 +88,16 @@ What this says:
 4. **Missing rules (RQ3):** no method reaches the ideal 50% confidence on `trap` cases; KV-based models separate rule-present from rule-missing cases better (abstention AUROC 0.68–0.71 for KV, 0.95 for the hybrid runs that trained, vs 0.55–0.65 for RAG).
 5. **Pruning:** the K-Means-pruned KV variant (top 8 of 128 clusters on pooled keys) drops the gold triple before routing (layer-3 ACC@5 27% vs 88%): OOD 61.8%, i.e. no knowledge. It halves latency but is not usable as built.
 
-**Training collapse (open problem).** With Jef frozen, some runs fall into an "always 50/50" solution and never leave it: the train decision loss reaches ≈ 0.59 (= 0.85·ln 2) by step ~200 and the logit margin on rule-present cases then decays to ~0 between steps 500 and 1,200.
+**Training collapse (open problem).** With Jef frozen, some runs end in an "always 50/50" solution: logit margin ≈ 0 on every case, train decision loss stuck at ≈ 0.59 (= 0.85·ln 2: 50/50 on the 85% of cases that have a rule). The train loss does not show it early, since every run, collapsed or not, sits near 0.57 for its first ~700 steps. The train margin does: in the two logged collapses it fell to ~0 between steps 500 and 700 (hybrid s1) and between 1,200 and 1,500 (RandomKV s2). **The mechanism is not established.**
 - *What it looks like:* in a collapsed adapter the [DEC] hidden state is the same for every case from layer 11 on (pairwise cosine 1.00), and the KG read-out is 5–12× the sequence read-out in the last KV layers (`scripts/probe_drown.py`).
-- *Where it lives:* swapping parameter groups between a good and a collapsed KV adapter (no-warmup seeds 1 and 2, 40 OOD cases, `scripts/probe_swap.py`) puts it in the KG value projections `W_V^kg`. The good adapter with the collapsed `W_V^kg` falls to 30% (margin 0.16); the collapsed adapter with the good `W_V^kg` recovers to 87%. Swapping the gate, prior or temperature changes nothing.
-- *How often:* without warmup, 3 of 9 frozen-Jef runs (seeds 0–2) collapsed; with warmup 200, 2 of 18 (seeds 0–5: KV 0/6, RandomKV 1/6, hybrid 1/6); with the top 2 Jef layers trainable, 0/6. It is deterministic per seed.
-- *Workaround, restart on collapse* (`--restart_on_collapse 2`): if an EMA of the train margin is below 0.1 at step 1,500, the run restarts with seed + 1000. Both collapsed warmup seeds were caught (EMA 0.014 and 0.002) and retrained into normal runs: hybrid s1 52.9 → 97.5 OOD (cf 94.9), RandomKV s2 47.8 → 66.8 (cf 7.6). The tables above report runs *without* restarts.
-- *Tried and dropped:* capping the KG read-out at the sequence's RMS removed the collapse mechanism but cost ~11 pts (gate run 8). Two single-factor fixes are being screened: a lower LR (3e-4) and freezing `W_V^kg` at its initialisation (`--freeze_kg_v`).
+- *What carries it:* swapping parameter groups between a good and a collapsed KV adapter (no-warmup seeds 1 and 2, 40 OOD cases, `scripts/probe_swap.py`) transfers it with the KG value projections `W_V^kg`. The good adapter with the collapsed `W_V^kg` falls to 30% (margin 0.16); the collapsed adapter with the good `W_V^kg` recovers to 87%. Swapping the gate, prior or temperature changes nothing. Only whole-`W_V^kg` swaps are interpretable: swapping it in layer groups (3–9 or 12–21) breaks both adapters. The collapsed run moved `W_V^kg` *less* from its initialisation than the good one (squared distance 2,388 vs 4,343).
+- *How often (no restarts):* without warmup, 3 of 9 frozen-Jef runs (seeds 0–2) collapsed; with warmup 200, 2 of 18 (seeds 0–5: KV 0/6, RandomKV 1/6, hybrid 1/6); with the top 2 Jef layers trainable, 0/6. It is deterministic per seed (the seed only sets the batch order).
+- *Workaround, restart on collapse* (`--restart_on_collapse 2`): if an EMA of the train margin is below 0.1 at step 1,500, the run restarts with seed + 1000. This uses training batches only, and it is a selection step, not a fix: a restarted run costs up to 50% more compute. Both collapsed warmup seeds were caught (EMA 0.014 and 0.002) and retrained into normal runs: hybrid s1 52.9 → 97.5 OOD (cf 94.9), RandomKV s2 47.8 → 66.8 (cf 7.6). The tables above report runs *without* restarts.
+- *Fixes screened* (one factor each; kv_jef seeds 0–2, RandomKV s2 and hybrid s1, the last two being the seeds that collapsed with the default recipe):
+  - Freezing `W_V^kg` at its initialisation (`--freeze_kg_v`): 0/5 collapsed, but the knowledge is gone: kv_jef OOD 64.4–67.2 / cf 16.5–17.4 (about the RandomKV level), hybrid 64.7 / cf 22.0. `W_V^kg` has to train.
+  - Adapter LR 3e-4 instead of 1e-3: 0/5 collapsed with unchanged accuracy: kv_jef 85.1 OOD / cf 57.2 on average (default recipe 84.4 / 58.1), hybrid s1 97.0 / cf 92.6, RandomKV s2 68.8 / cf 20.1 (a stronger control than usual, which can only shrink KV's measured advantage). **This is a pilot, not evidence of a fix:** at the 2/18 base rate, 5 clean runs happen by chance about 56% of the time, and warmup also rescued the seeds that had collapsed before it while collapsing others. The tables keep LR 1e-3.
+  - Capping the KG read-out at the sequence's RMS (gate run 8, one seed): cost ~11 pts OOD, dropped.
+- *Next:* an instrumented pair, the same recipe with a collapsing and a non-collapsing seed (`bash run_all.sh probe`: hybrid s1 and s3), logs margin and accuracy with and without the KG, [DEC] cosine, KG:sequence ratio and temperature every 25 steps on a fixed batch, and saves a checkpoint at step 1,000.
 
 Per-seed numbers are in each `runs/<config>_s<seed>/eval.json`; `bash run_all.sh full` also writes means to `outputs/results.md` and plots. The no-warmup RAG rows come from `rag_nowarm_s*` (same stage).
 
@@ -122,16 +126,21 @@ Limits: synthetic English data, numeric threshold rules only; Jef itself is Engl
 ## Project structure
 
 ```text
-jefkv/attention.py      separated-softmax KG attention for ModernBERT global layers (transformers 5.x)
-jefkv/memory.py         KG memory (Jef token states or MiniLM), GPU K-Means pruning, dense + BM25 retrievers
-jefkv/model.py          Decision-Jef wrapper: KV injection, frozen [DEC] heads, retrieval-conditioned temperature
-data/generate_benchmark.py
-scripts/train.py        modes kv | rag | hybrid, --random_kv, --kv_encoder, AtlasKV curriculum, fp16 on T4
-scripts/eval.py         accuracy, ECE, trap confidence, abstention AUROC, per-layer ACC@1/5, latency
-scripts/plot_results.py results.md (mean ± std over seeds) + plots
-tests/test_jefkv.py     self-check: no KG == stock Jef; masked KG == stock Jef; live KG changes output
-run_all.sh              smoke | gate | full
-kaggle/run_kaggle.py    entry point for a Kaggle GPU kernel
+jefkv/attention.py        gated KG attention (KV memory) for ModernBERT global layers (transformers 5.x)
+jefkv/memory.py           KG memory (Jef token states or MiniLM), GPU K-Means pruning, dense + BM25 retrievers
+jefkv/model.py            Decision-Jef wrapper: KV injection, frozen [DEC] heads, retrieval-conditioned temperature
+data/generate_benchmark.py synthetic benchmark (--exclude builds a test set with no shared entity names)
+scripts/train.py          modes kv | rag | hybrid, --random_kv, --kv_encoder, --freeze_kg_v, --restart_on_collapse,
+                          --probe_every (training diagnostics on a fixed batch), --ckpt_at
+scripts/eval.py           accuracy, ECE, trap confidence, abstention AUROC, counterfactual cf, ACC@1/5, latency
+scripts/plot_results.py   results.md (mean ± std over seeds) + plots
+scripts/plot_summary.py   the README headline figure (docs/results_*.svg)
+scripts/probe_*.py        diagnostics: KG vs sequence read-out (drown), parameter swaps (swap), KG gate (lambda)
+scripts/check_overlap.py  entity-name overlap between two benchmark files
+tests/test_jefkv.py       self-check: no KG == stock Jef; masked KG == stock Jef; live KG changes output
+run_all.sh                all stages (smoke | gate | full | seeds | restart | screen_* | fresh | ...)
+run_modal.py              run a stage on a Modal T4
+colab/run_stage.sh        run a stage on a free Colab T4 (Colab CLI)
 ```
 
 ## Running
@@ -144,14 +153,13 @@ bash run_all.sh gate                     # step 1 on a GPU: clean KV vs RandomKV
 bash run_all.sh full                     # all configs x 3 seeds + zero-shot baselines -> outputs/results.md
 ```
 
-`gate` is a stop/go check: if the clean-KG loss does not separate from the RandomKV loss, the KV heads are not retrieving and the rest is not worth running. On a T4 training runs in fp16 automatically. Other stages: `warm` (the warmup check above), `seeds` (seeds 3–5 of the frozen-Jef configs), `restart` (restart on collapse), `screen_lr` / `screen_fkv` (the two collapse fixes), `fresh` (re-evaluation on a fresh test set), `unf`, `rag`.
+`gate` is a stop/go check: if the clean-KG loss does not separate from the RandomKV loss, the KV heads are not retrieving and the rest is not worth running. On a T4 training runs in fp16 automatically. Other stages: `warm` (the warmup check above), `seeds` (seeds 3–5 of the frozen-Jef configs), `restart` (restart on collapse), `screen_lr` / `screen_fkv` (the two collapse fixes), `probe` (the instrumented pair), `fresh` (re-evaluation on a fresh test set), `unf`, `rag`.
 
-Where to get a GPU (Modal and Colab ran this code on a T4, Kaggle ran the CPU `smoke` stage; one KV run ≈ 10 min incl. eval, `full` ≈ 3–4 h):
+Where to get a GPU (Modal and Colab ran this code on a T4; one KV run ≈ 10 min incl. eval, `full` ≈ 3–4 h):
 
 | Option | Cost | How |
 |---|---|---|
-| Colab (free T4) | free, subject to Colab's usage limits | Colab CLI (Linux/macOS/WSL): `uv tool install google-colab-cli`, then `bash colab/run_stage.sh <stage>`; results in `runs_colab/<stage>/` |
-| Kaggle (free T4) | free, the GPU queue can take hours | `KAGGLE_ENV=<file with KAGGLE_API_TOKEN=...> bash kaggle/push.sh <stage> new` (first time; `version` afterwards); results via `kaggle kernels output <user>/jefkv-run` |
+| Colab (free T4) | free, subject to Colab's usage limits | Colab CLI (Linux/macOS/WSL): `uv tool install google-colab-cli`, then `bash colab/run_stage.sh <stage>`; results in `runs_colab/<stage>/`, fetched after every finished run because a free runtime can be reclaimed mid-stage |
 | Modal (T4) | ~$0.25 per run, ~$3.5 for `full` | `modal deploy run_modal.py && python run_modal.py <stage>` (keeps running if your machine disconnects; `modal run --detach` did not), results on the `jefkv-runs` volume, then `modal app stop jefkv` |
 
 ## References & Acknowledgments
@@ -260,8 +268,9 @@ Code, experiments and this README were written with Claude Opus 5.5 (Claude Code
 | Gemini 3.8 Flash Low | checking the implementation against the AtlasKV paper (curriculum, KG2KV key/value format, ACC@k) |
 | GPT-6 Luna | brainstorming and cross-review (e.g. screening the collapse fixes one factor at a time, as `screen_lr` / `screen_fkv` do, instead of combining them) |
 | DeepSeek V4.1 Flash | code reviews (e.g. an infinite gradient from a clamp placed after a `sqrt` in the dropped RMS cap) |
+| Hy4 Flash | brainstorming and cross-review of the collapse analysis |
 
-The gated mixing + triple prior design (gate run 7) came out of one such brainstorm. Every finding was checked and re-run before use, and several suggestions were rejected after checking. All numbers in this README come from the runs, not from the models.
+The gated mixing + triple prior design (gate run 7) came out of one such brainstorm. For the training collapse, a second round gave the four models our own reading of the probes to attack. They showed that three of our conclusions were overstated (a probe that centred the wrong quantity, a comparison across warmup settings, a loss plateau that non-collapsing runs share), which is why the "Training collapse" paragraph reports measurements and leaves the mechanism open. Every finding was checked and re-run before use, and several suggestions were rejected after checking. All numbers in this README come from the runs, not from the models.
 
 ## License
 

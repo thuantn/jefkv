@@ -75,6 +75,7 @@ class JefKVModel(nn.Module):
         self.temp = nn.Linear(2 * len(self.kg_modules), 1).to(device)
         nn.init.zeros_(self.temp.weight)
         nn.init.constant_(self.temp.bias, 0.5413)   # softplus(0.5413) = 1.0: start at Jef's own scale
+        self.last_temp: Optional[torch.Tensor] = None
 
     # ---------- KG ----------
     def set_kg(self, keys, vals, slot_mask, query_mask=None):
@@ -135,7 +136,9 @@ class JefKVModel(nn.Module):
                 feats.append(torch.stack([m.lambda_kg, F.softmax(tl, -1).max(-1).values], -1))
             f = torch.cat(feats, -1) if feats else logits.new_zeros(logits.shape[0], 0)
             if kg is not None or not self.kg_modules:  # a KV model without a KG stays exactly stock Jef
-                logits = logits * F.softplus(self.temp(f))
+                t = F.softplus(self.temp(f))
+                self.last_temp = t.detach()  # read by train.py --probe_every
+                logits = logits * t
         finally:
             self.set_kg(None, None, None)
         return logits, triple_logits, triple_attn
