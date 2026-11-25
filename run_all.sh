@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|fresh|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|confirm_lr|fresh|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
 #   probe  instrumented pair, same recipe: hybrid s1 (collapses) vs s3 (does not), probe() every 25 steps, ckpt at 1000
+#   confirm_lr  LR 3e-4 on hybrid s0, s2 and randomkv s0, s1 (completes a 3x3 matrix with screen_lr)
 #   screen_lr / screen_fkv  collapse fixes, one factor each: adapter lr 3e-4 | --freeze_kg_v (kv s0-2, randomkv s2, hybrid s1)
 #   fresh  every trained adapter on a fresh test set (seed 7, no shared names) + no-warmup RAG runs
 #   smoke  tiny CPU check that every code path runs (minutes)
@@ -13,7 +14,7 @@
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|fresh|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|confirm_lr|fresh|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -67,6 +68,12 @@ if [ "$STAGE" = fresh ]; then  # final adapters on a fresh test set (new entitie
     [ -f "runs/fresh/$n/eval.json" ] || $PY scripts/eval.py --run "$r" --test data/fresh/test.json --out_dir "runs/fresh/$n"
   done
   [ -f runs/fresh/zs_base/eval.json ] || $PY scripts/eval.py --zero_shot base --test data/fresh/test.json --out_dir runs/fresh/zs_base
+  exit 0
+fi
+
+if [ "$STAGE" = confirm_lr ]; then  # LR 3e-4 candidate, seeds not in screen_lr
+  for s in 0 2; do train_eval hybrid_lr3e4_s$s --mode hybrid --seed $s --lr 3e-4; done
+  for s in 0 1; do train_eval kv_jef_randomkv_lr3e4_s$s --mode kv --random_kv --seed $s --lr 3e-4; done
   exit 0
 fi
 
