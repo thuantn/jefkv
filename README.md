@@ -88,6 +88,19 @@ What this says:
 4. **Missing rules (RQ3):** no method reaches the ideal 50% confidence on `trap` cases; KV-based models separate rule-present from rule-missing cases better (abstention AUROC 0.68–0.71 for KV, 0.95 for the hybrid runs that trained, vs 0.55–0.65 for RAG).
 5. **Pruning:** the K-Means-pruned KV variant (top 8 of 128 clusters on pooled keys) drops the gold triple before routing (layer-3 ACC@5 27% vs 88%): OOD 61.8%, i.e. no knowledge. It halves latency but is not usable as built.
 
+**Cost compared with stock Jef.** Measured on this repo's setup (latency = mean per case in `scripts/eval.py` on a T4, fp16):
+
+| | stock Jef | JefKV (frozen Jef + KV memory) |
+|---|---|---|
+| Parameters | 307.3M | + 11.2M trainable adapter (+3.6%; 45 MB in fp32) |
+| Knowledge memory | none | 172 KB per triple in fp16 (16 token slots × 7 KV layers × 768), i.e. **1.72 GB of GPU memory for the 10K-triple test KG**; for comparison, the MiniLM RAG index for the same triples is ~15 MB (10K × 384 floats) |
+| Latency per case | 21 ms (zero-shot) | 115 ms (~5.5×); RAG 28–44 ms, hybrid 175 ms |
+| OOD accuracy here | 51.9% (no access to the rules) | 84.6% (best RAG 79.0%, hybrid 97.2%) |
+| Without a KG | — | exactly stock Jef (see Limitations for a fully masked KG) |
+| Updating a fact | — | re-encode that one triple; no retraining |
+
+The memory grows linearly with the KG, so a KG much larger than ~10K triples needs pruning (the K-Means variant above is broken) or fewer slots per triple. Decision-Jef's model card compares Jef with the hosted Jev API on its own benchmark; this repo does not evaluate Jev, and Jev's size and latency are not published.
+
 **Training collapse (open problem).** With Jef frozen, some runs end in an "always 50/50" solution: logit margin ≈ 0 on every case, train decision loss stuck at ≈ 0.59 (= 0.85·ln 2: 50/50 on the 85% of cases that have a rule). The train loss does not show it early, since every run, collapsed or not, sits near 0.57 for its first ~700 steps. The train margin does: in the two logged collapses it fell to ~0 between steps 500 and 700 (hybrid s1) and between 1,200 and 1,500 (RandomKV s2). **The mechanism is not established.**
 - *What it looks like:* in a collapsed adapter the [DEC] hidden state is the same for every case from layer 11 on (pairwise cosine 1.00), and the KG read-out is 5–12× the sequence read-out in the last KV layers (`scripts/probe_drown.py`).
 - *What carries it:* swapping parameter groups between a good and a collapsed KV adapter (no-warmup seeds 1 and 2, 40 OOD cases, `scripts/probe_swap.py`) transfers it with the KG value projections `W_V^kg`. The good adapter with the collapsed `W_V^kg` falls to 30% (margin 0.16); the collapsed adapter with the good `W_V^kg` recovers to 87%. Swapping the gate, prior or temperature changes nothing. Only whole-`W_V^kg` swaps are interpretable: swapping it in layer groups (3–9 or 12–21) breaks both adapters. The collapsed run moved `W_V^kg` *less* from its initialisation than the good one (squared distance 2,388 vs 4,343).
