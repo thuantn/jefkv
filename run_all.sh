@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
@@ -12,6 +12,7 @@
 #   seeds_lr  seeds 3-5 of kv_jef / randomkv / hybrid with LR 3e-4 (6 seeds per config with screen_lr + confirm_lr)
 #   screen_lr / screen_fkv  collapse fixes, one factor each: adapter lr 3e-4 | --freeze_kg_v (kv s0-2, randomkv s2, hybrid s1)
 #   fresh  every trained adapter on a fresh test set (seed 7, no shared names) + no-warmup RAG runs
+#   factkg_diag  every FactKG adapter with eval.py --diag (recall, oracle retrieval ceilings, dense pre-filter; JOBS=1 for clean latency)
 #   factkg_scale  every FactKG adapter re-evaluated with the same claims and a 4.9k / 20k / 50k-triple KG (eval only)
 #   factkg_more  FactKG seeds 1-2 of kv / randomkv, plus the paper's MiniLM KG2KV (kv_minilm) with its RandomKV control
 #   factkg  pilot on real claims: FactKG one-hop (data/factkg from scripts/factkg_convert.py, never committed), seed 0
@@ -23,7 +24,7 @@
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -130,6 +131,15 @@ if [ "$STAGE" = factkg ]; then  # real claims, frozen Jef: is KV still causal (c
   train_eval fk_kv_jef_s0 --mode kv $F
   train_eval fk_kv_jef_randomkv_s0 --mode kv --random_kv $F
   [ -f runs/fk_zs_base/eval.json ] || run_job fk_zs_base gpu_eval --zero_shot base --test $EVAL_TEST --out_dir runs/fk_zs_base
+  exit 0
+fi
+
+if [ "$STAGE" = factkg_diag ]; then  # is KV retrieval-bound or reader-bound on real data? (eval only)
+  for r in runs/fk_*_s[0-9]; do
+    n=$(basename "$r"); [ -f "$r/adapter.pt" ] || continue
+    [ -f "runs/fk_diag/$n/eval.json" ] || run_job "fkd_$n" gpu_eval --run "$r" --test data/factkg/test.json --diag --out_dir "runs/fk_diag/$n"
+  done
+  [ -f runs/fk_diag/zs_rag/eval.json ] || run_job fkd_zs_rag gpu_eval --zero_shot rag --test data/factkg/test.json --diag --out_dir runs/fk_diag/zs_rag
   exit 0
 fi
 

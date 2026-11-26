@@ -152,7 +152,9 @@ class AtlasKVModernBertAttention(nn.Module):
             # Attention spread over all ~161K slots of the 10K test KG let almost no value of the right
             # triple through (gate run 4: retrieval 95%, decisions 64% vs trained RAG 78%), so every
             # KV layer, this one included, attends only to the top-k triples of this case.
-            top = trip.detach().topk(min(self.select_k, M), dim=-1).indices   # [B,k]
+            top = self.route.get("force")  # eval-only oracle routing (scripts/eval.py): given triple ids [B,k]
+            if top is None:
+                top = trip.detach().topk(min(self.select_k, M), dim=-1).indices   # [B,k]
             z = trip.detach().gather(1, top)                                  # [B,k]
             z = (z - z.mean(-1, keepdim=True)) / z.std(-1, keepdim=True).clamp(min=1e-4) if z.shape[1] > 1 else z * 0
             self.route.update(idx=top, z=z)

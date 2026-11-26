@@ -153,7 +153,8 @@ class BM25Retriever:
         from rank_bm25 import BM25Okapi
 
         self.triples = triples
-        self.bm25 = BM25Okapi([_TOK.findall(triple_text(t).lower()) for t in triples])
+        self.docs = [_TOK.findall(triple_text(t).lower()) for t in triples]  # kept: eval re-indexes an edited row
+        self.bm25 = BM25Okapi(self.docs)
 
     def search(self, query: str, k: int) -> Tuple[List[int], List[float]]:
         scores = torch.tensor(self.bm25.get_scores(_TOK.findall(query.lower())))
