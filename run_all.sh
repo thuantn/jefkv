@@ -161,10 +161,10 @@ if [ "$STAGE" = factkg_t2 ]; then  # T2 of docs/PREREG_factkg.md: does a partly 
   wait; exit 0
 fi
 
-if [ "$STAGE" = factkg_t3 ]; then  # T3 of docs/PREREG_factkg.md: is the KV reader under-trained? one job per GPU (ONLY)
-  K="--mode kv --max_slots 32 --kg_store cpu --rollback_on_collapse 3 --steps 9000 --seed 0 --data data/factkg/train.json"
-  R="--mode rag --steps 9000 --seed 0 --data data/factkg/train.json"
-  for c in "fk_kv_jef_unf6_m32_9k_s0:$K --unfreeze_top 6:kv" "fk_kv_jef_unf19_m32_9k_s0:$K --unfreeze_top 19:kv"            "fk_rag_unf6_9k_s0:$R --unfreeze_top 6:rag" "fk_rag_unf19_9k_s0:$R --unfreeze_top 19:rag"; do
+if [ "$STAGE" = factkg_t3 ]; then  # T3 of docs/PREREG_factkg.md: is the KV reader under-trained? one job per GPU (ONLY); T3_SEED=1 for the seed-1 rule
+  K="--mode kv --max_slots 32 --kg_store cpu --rollback_on_collapse 3 --steps 9000 --seed ${T3_SEED:-0} --data data/factkg/train.json"
+  R="--mode rag --steps 9000 --seed ${T3_SEED:-0} --data data/factkg/train.json"
+  for c in "fk_kv_jef_unf6_m32_9k_s${T3_SEED:-0}:$K --unfreeze_top 6:kv" "fk_kv_jef_unf19_m32_9k_s${T3_SEED:-0}:$K --unfreeze_top 19:kv"            "fk_rag_unf6_9k_s${T3_SEED:-0}:$R --unfreeze_top 6:rag" "fk_rag_unf19_9k_s${T3_SEED:-0}:$R --unfreeze_top 19:rag"; do
     n=${c%%:*}; rest=${c#*:}; a=${rest%:*}; m=${rest##*:}
     [[ $n =~ ${ONLY:-.} ]] || continue; [ -f "runs/$n/eval.json" ] && { echo "skip $n (done)"; continue; }
     if [ "$m" = kv ]; then v='^(kv_full|kv_oracle|kv_oracle_goldonly)$'; else v='^(rag_dense_k3|rag_dense_k3_oracle)$'; fi

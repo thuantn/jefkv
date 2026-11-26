@@ -1,0 +1,90 @@
+{
+ "train_args": {
+  "data": "data/factkg/train.json",
+  "mode": "rag",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/fk_rag_unf19_9k_s0",
+  "steps": 9000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 200,
+  "unfreeze_top": 19,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "kg_store": "",
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 0,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 0,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 0,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 0,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "rag_dense_k3": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 99.89,
+    "avg_ms": 35.96,
+    "p95_ms": 38.76,
+    "acc": 98.24,
+    "ece": 0.0165,
+    "acc_label_true": 98.75,
+    "acc_label_false": 97.61,
+    "recall": {
+     "@3": 87.54,
+     "true@3": 97.66,
+     "false@3": 75.17
+    },
+    "cf": {
+     "pair_acc": 65.32,
+     "flip_rate": 65.41,
+     "n": 2327,
+     "pair_acc_ci95": 1.93,
+     "pair_acc_label_true": 40.23,
+     "pair_acc_label_false": 95.99,
+     "gold_retrieved": 64.37
+    }
+   }
+  },
+  "rag_dense_k3_oracle": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 99.93,
+    "avg_ms": 35.99,
+    "p95_ms": 38.95,
+    "acc": 98.15,
+    "ece": 0.0184,
+    "acc_label_true": 99.14,
+    "acc_label_false": 96.94,
+    "cf": {
+     "pair_acc": 79.11,
+     "flip_rate": 79.24,
+     "n": 2327,
+     "pair_acc_ci95": 1.65,
+     "pair_acc_label_true": 65.39,
+     "pair_acc_label_false": 95.89,
+     "gold_retrieved": 100.0
+    }
+   }
+  }
+ }
+}

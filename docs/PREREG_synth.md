@@ -49,6 +49,9 @@ A collapsed run (OOD within 50 +- 3) is reported and left out of the means; 2 of
 - **Rule 2 fails:** with the same 6 trainable encoder layers, RAG6 is 3.4 OOD / 10.5 cf above KV (KV even has 11.2M more
   trainable parameters), so this loss is decisive.
 - **Rule 3 (b):** the shuffled hybrid is 1.5 cf below the real one (rule: >= 10), so its cf does not come from KV facts.
-  (a) pending (`synth_diag`).
+- **Rule 3 (a)** (`results/synth_diag`, Modal T4): `hybrid_qclaim` 97.5 / 95.6 and 96.5 / 95.2; an edit of the KV alone
+  moves cf pair **1.4 and 0.9** (rule: >= 20), an edit of the text alone 94.2 and 94.1. Deviation: 2 seeds (s0, s1), the
+  s2 adapter was not kept. Both readings agree: **the hybrid's KV branch works as an adapter on the retrieved text; it
+  does not read its KV facts** (as on FactKG, 2.1).
 - Reported only: on `multi` (two rules combined) KV-unf6 66.2 vs RAG6 BM25 60.6 / dense 65.7.
 

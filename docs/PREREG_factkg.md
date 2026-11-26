@@ -128,16 +128,19 @@ trained at 16): cut-gold claims (674) 82.0 / 30.7 -> **84.1 / 37.4** (+6.7 cf, r
 89.1 / 51.4 -> 89.1 / 51.9 (unchanged, as expected); ALL 87.1 / 45.4 -> 87.6 / 47.7, every seed up (cf +2.1 to +2.6).
 The frozen KV ceiling stays below RAG2 (ALL 91.5 / 50.8), so the FactKG verdict is unchanged. T2 trains at 32 slots.
 
-### T2 so far (27/11/2026, `results/factkg_t2`; RTX 3090, no rollback fired)
+### Outcome of T2 (27/11/2026, `results/factkg_t2`; no rollback fired): inconclusive
 | seed | `kv_full` | `kv_oracle` | `kv_oracle_goldonly` |
 |---|---|---|---|
-| 0 | 79.5 / 21.3 | 91.1 / 48.6 | 90.9 / 52.9 |
-| 1 | 79.2 / 23.0 | 92.4 / 52.9 | 92.7 / 61.1 |
-Gold-only cf mean 57.0: between 55 and 60.7, so the rule asks for seed 2. Deviation: seed 2 runs on a Modal T4 (the
-Vast credit is held for T3), fp16 as on the 3090; trajectories differ between GPUs, so it is a seed, not a replicate.
+| 0 (3090) | 79.5 / 21.3 | 91.1 / 48.6 | 90.9 / 52.9 |
+| 1 (3090) | 79.2 / 23.0 | 92.4 / 52.9 | 92.7 / 61.1 |
+| 2 (Modal T4) | 79.7 / 22.2 | 91.9 / 51.1 | 92.1 / 56.8 |
+| mean | 79.5 / 22.2 | 91.8 / 50.9 | 91.9 / **56.9** |
+After seeds 0-1 the mean (57.0) was between 55 and 60.7, so seed 2 ran; the 3-seed mean 56.9 is still in between =
+**inconclusive, stop** (rule above). Deviation: seed 2 ran on a Modal T4 (the Vast credit was held for T3), fp16 as on
+the 3090; trajectories differ between GPUs, so it is a seed, not a replicate. G_T2 = 56.9 for T3.
 RAG6 with the gold triples first in its text (`rag_dense_k3_oracle`, eval only, 3 seeds): 97.1 / **79.8**
 (79.1, 80.4, 80.1), i.e. the RAG reader with the right facts is ~20 cf above the 6-layer KV reader with only the right facts.
-`kv_full` is below frozen KV (79.3 vs 81.4 acc, cf 22.2 vs 28.0): training the top layers did not help natural routing.
+`kv_full` is below frozen KV (79.5 vs 81.4 acc, cf 22.2 vs 28.0, 3 seeds): training the top layers did not help natural routing.
 
 ## T3: is the KV reader under-trained? (registered 27/11/2026, before running)
 Why: at the end of T2 the KV training loss was still falling (FactKG dec_loss 0.148 -> 0.137 over the last 1,000
@@ -165,3 +168,16 @@ lower the bar.
 Not controlled: one LR pair for all budgets (heads 1e-3, encoder 2e-5, one grad-norm clip), warmup 200, the KG keys
 re-encoded every 100 steps (a moving target for KV), layer 3 still routes with identity Q/K.
 Caveat stated in advance: with 19 of 22 layers trainable JefKV is close to a full fine-tune, not a plug-in memory.
+
+### T3 seed 0 (27/11/2026, `results/factkg_t3`; KV on an RTX 3090, RAG on Modal T4; no rollback fired)
+| run (9,000 steps) | `kv_full` / `rag_dense_k3` | `kv_oracle` | G or RAG-oracle cf | last 500-step dec_loss |
+|---|---|---|---|---|
+| KV, 6 trainable layers | 82.1 / 23.6 | 93.6 / 55.4 | **65.8** | 0.010 |
+| KV, 19 trainable layers | 83.6 / 24.1 | 94.5 / 55.0 | **66.3** | 0.006 |
+| RAG, 6 trainable layers | 96.9 / 61.8 | | 98.1 / 81.2 | 0.000 |
+| RAG, 19 trainable layers | 98.2 / 65.3 | | 98.2 / 79.1 | 0.000 |
+G_T2 = 56.9. Steps effect +8.9 cf, depth effect +0.5. Thresholds: under-trained >= 66.9, not under-trained < 61.9.
+Both runs are in between and within 3 of 66.9, so the rule asks for seed 1 before it is read (running, same box type).
+**KV competitive: no** for either run, seed 0: R = 81.2 (6 layers) / 79.1 (19 layers), so G must be >= 76.2 / 74.1;
+G is 10.4 / 7.8 short, not within 3 of the threshold. With natural routing the gap is ~40 cf (23.6 vs 61.8).
+With 9,000 steps both readers fit the training set (KV loss 0.01, RAG ~0), so the gap at the oracle is not a loss gap.

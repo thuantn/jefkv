@@ -1,0 +1,220 @@
+{
+ "train_args": {
+  "data": "data/processed/train.json",
+  "mode": "hybrid",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/hybrid_rbv_s0",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 200,
+  "unfreeze_top": 0,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 0,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 0,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "hybrid_qclaim": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 96.5,
+    "avg_ms": 181.17,
+    "p95_ms": 207.23,
+    "acc": 97.5,
+    "ece": 0.0105,
+    "retrieval": {
+     "3": {
+      "acc@1": 81.3,
+      "acc@5": 92.8,
+      "score_acc@5": 93.0
+     },
+     "6": {
+      "acc@1": 81.6,
+      "acc@5": 93.8,
+      "score_acc@5": 24.3
+     },
+     "9": {
+      "acc@1": 81.6,
+      "acc@5": 94.0,
+      "score_acc@5": 33.3
+     },
+     "12": {
+      "acc@1": 81.4,
+      "acc@5": 93.0,
+      "score_acc@5": 36.1
+     },
+     "15": {
+      "acc@1": 81.7,
+      "acc@5": 93.6,
+      "score_acc@5": 37.3
+     },
+     "18": {
+      "acc@1": 81.5,
+      "acc@5": 92.9,
+      "score_acc@5": 37.6
+     },
+     "21": {
+      "acc@1": 81.6,
+      "acc@5": 93.6,
+      "score_acc@5": 42.2
+     }
+    },
+    "cf": {
+     "pair_acc": 95.6,
+     "flip_rate": 95.7,
+     "n": 1000,
+     "pair_acc_ci95": 1.27,
+     "pair_acc_label_true": 93.37,
+     "pair_acc_label_false": 97.68,
+     "gold_retrieved": 96.2
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 75.84,
+    "avg_ms": 194.48,
+    "p95_ms": 218.4,
+    "acc": 67.8,
+    "ece": 0.0804,
+    "retrieval": {
+     "3": {
+      "acc@1": 35.8,
+      "acc@5": 74.0,
+      "score_acc@5": 74.0
+     },
+     "6": {
+      "acc@1": 35.2,
+      "acc@5": 69.8,
+      "score_acc@5": 19.4
+     },
+     "9": {
+      "acc@1": 39.4,
+      "acc@5": 72.6,
+      "score_acc@5": 38.6
+     },
+     "12": {
+      "acc@1": 35.8,
+      "acc@5": 73.2,
+      "score_acc@5": 24.8
+     },
+     "15": {
+      "acc@1": 37.2,
+      "acc@5": 73.0,
+      "score_acc@5": 36.2
+     },
+     "18": {
+      "acc@1": 37.8,
+      "acc@5": 74.6,
+      "score_acc@5": 26.6
+     },
+     "21": {
+      "acc@1": 39.4,
+      "acc@5": 72.6,
+      "score_acc@5": 40.8
+     }
+    }
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 75.34,
+    "avg_ms": 181.38,
+    "p95_ms": 208.64,
+    "acc": 73.8,
+    "ece": 0.0176,
+    "retrieval": {
+     "3": {
+      "acc@1": 24.4,
+      "acc@5": 34.2,
+      "score_acc@5": 34.2
+     },
+     "6": {
+      "acc@1": 25.0,
+      "acc@5": 35.0,
+      "score_acc@5": 11.4
+     },
+     "9": {
+      "acc@1": 24.8,
+      "acc@5": 36.4,
+      "score_acc@5": 14.8
+     },
+     "12": {
+      "acc@1": 24.6,
+      "acc@5": 34.6,
+      "score_acc@5": 15.4
+     },
+     "15": {
+      "acc@1": 24.6,
+      "acc@5": 36.2,
+      "score_acc@5": 16.2
+     },
+     "18": {
+      "acc@1": 25.2,
+      "acc@5": 35.4,
+      "score_acc@5": 15.8
+     },
+     "21": {
+      "acc@1": 25.6,
+      "acc@5": 34.6,
+      "score_acc@5": 15.0
+     }
+    }
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 67.25,
+    "avg_ms": 181.08,
+    "p95_ms": 195.0
+   },
+   "abstain_auroc": 0.9544
+  },
+  "hybrid_qclaim_cfkv": {
+   "ood": {
+    "cf": {
+     "pair_acc": 1.4,
+     "flip_rate": 1.6,
+     "n": 1000,
+     "pair_acc_ci95": 0.73,
+     "pair_acc_label_true": 0.83,
+     "pair_acc_label_false": 1.93
+    }
+   }
+  },
+  "hybrid_qclaim_cfrag": {
+   "ood": {
+    "cf": {
+     "pair_acc": 94.2,
+     "flip_rate": 94.2,
+     "n": 1000,
+     "pair_acc_ci95": 1.45,
+     "pair_acc_label_true": 91.3,
+     "pair_acc_label_false": 96.91,
+     "gold_retrieved": 96.2
+    }
+   }
+  }
+ }
+}

@@ -99,7 +99,7 @@ R "$VENV mkdir -p /root/jefkv/runs && tar -xzf /root/code.tgz -C /root/jefkv && 
    { [ ! -f /root/runs_in.tgz ] || tar -xzf /root/runs_in.tgz -C runs; } && pip install -q -r requirements.txt 2>&1 | grep -v 'as the .root. user' | tail -2; \
    nvidia-smi --query-gpu=name,driver_version --format=csv,noheader; python -c 'import torch, transformers; print(\"torch\", torch.__version__, \"transformers\", transformers.__version__, \"cuda ok\", torch.cuda.is_available())'"
 RT "cd /root/jefkv && (sleep $((MAX_HOURS * 3600)); pkill -f '^bash run_all[.]sh'; [ -n \"\${CONTAINER_API_KEY:-}\" ] && curl -s -X DELETE https://console.vast.ai/api/v0/instances/\${CONTAINER_ID}/ -H \"Authorization: Bearer \${CONTAINER_API_KEY}\") >/dev/null 2>&1 < /dev/null & \
-   $VENV cd /root/jefkv && nohup env PYTHONPATH=. JEFKV_AMP=$AMP JOBS=$JOBS ONLY='${ONLY:-}' bash -c 'for st in $STAGES; do bash run_all.sh \$st || exit 1; done' > /root/stage.log 2>&1 < /dev/null &"
+   $VENV cd /root/jefkv && nohup env PYTHONPATH=. JEFKV_AMP=$AMP JOBS=$JOBS ONLY='${ONLY:-}' T3_SEED='${T3_SEED:-}' bash -c 'for st in $STAGES; do bash run_all.sh \$st || exit 1; done' > /root/stage.log 2>&1 < /dev/null &"
 R 'echo container_key_present=$([ -n "${CONTAINER_API_KEY:-}" ] && echo yes || echo no)'
 echo "$(date +%H:%M) started: $STAGES (amp $AMP, jobs $JOBS${ONLY:+, ONLY=$ONLY})"
 
