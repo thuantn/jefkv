@@ -33,7 +33,8 @@ def probe(s, kg):
         if m.triple_logits is None:
             feats.append(torch.zeros(1, 2))
         else:
-            feats.append(torch.stack([m.lambda_kg, F.softmax(m.triple_logits, -1).max(-1).values], -1))
+            tl = m.triple_logits.topk(min(model.feat_k, m.triple_logits.shape[-1]), dim=-1).values  # as model.py
+            feats.append(torch.stack([m.lambda_kg, F.softmax(tl, -1).max(-1).values], -1))
     lam = [round(m.lambda_kg.item(), 3) if m.lambda_kg is not None else 0 for m in model.kg_modules.values()]
     factor = F.softplus(model.temp(torch.cat(feats, -1))).item()
     model.set_kg(None, None, None)
