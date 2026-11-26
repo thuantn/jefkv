@@ -14,6 +14,7 @@ import argparse
 import io
 import json
 import math
+import os
 import random
 import time
 from pathlib import Path
@@ -27,6 +28,8 @@ from jefkv.model import JefKVModel
 
 
 def amp_dtype(device: str, amp: str) -> torch.dtype:
+    if amp == "auto":  # JEFKV_AMP=fp16 on a bf16-capable GPU keeps the T4 recipe (every published run is fp16)
+        amp = os.environ.get("JEFKV_AMP", "auto")
     if device != "cuda" or amp == "fp32":
         return torch.float32
     if amp == "auto":  # T4 (sm75) has no real bf16

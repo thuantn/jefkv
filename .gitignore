@@ -24,3 +24,6 @@ docs/LESSONS_ARCHIVE_*.md
 runs_modal/
 runs_colab/
 .vscode/
+runs_bench/
+runs_vast/
+data/factkg/

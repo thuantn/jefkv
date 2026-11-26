@@ -130,12 +130,15 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
     both = flips = n = 0
     for s in tqdm(samples, desc=variant["name"] + "/cf", leave=False):
         nums = re.findall(r"\d+", s["state"])
-        if not s["gold_idx"] or not nums:
+        if not s["gold_idx"] or not (nums or "cf_tail" in s):
             continue
         gi = s["gold_idx"][0]
-        x = int(nums[-1])
-        d = max(1, round(0.1 * x))
-        swapped = dict(triples[gi], tail=str(x - d) if s["label"] else str(x + d))
+        if "cf_tail" in s:  # real data (FactKG): the converter picked a tail that flips the label
+            swapped = dict(triples[gi], tail=s["cf_tail"])
+        else:
+            x = int(nums[-1])
+            d = max(1, round(0.1 * x))
+            swapped = dict(triples[gi], tail=str(x - d) if s["label"] else str(x + d))
         preds = []
         for t, label in ((triples[gi], s["label"]), (swapped, 1 - s["label"])):
             ctx, kg, undo = None, None, None
@@ -227,8 +230,9 @@ def main():
         cf = counterfactual(model, splits["ood"], v, memory, retrievers, triples, device, dt)
         if cf:
             res["ood"]["cf"] = cf
-        y = [1] * len(confs["ood"]) + [0] * len(confs["trap"])
-        res["abstain_auroc"] = round(float(roc_auc_score(y, confs["ood"] + confs["trap"])), 4)
+        if "trap" in confs:
+            y = [1] * len(confs["ood"]) + [0] * len(confs["trap"])
+            res["abstain_auroc"] = round(float(roc_auc_score(y, confs["ood"] + confs["trap"])), 4)
         results["variants"][v["name"]] = res
         print(v["name"], json.dumps({k: {m: x for m, x in r.items() if m != "retrieval"} if isinstance(r, dict) else r
                                      for k, r in res.items()}))

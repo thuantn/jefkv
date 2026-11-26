@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|confirm_lr|seeds_lr|fresh|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
@@ -7,18 +7,22 @@
 #   rescue hybrid s1 to step 400 (just before its collapse), then 3 resumes to step 1000: unchanged | LR 3e-4 | new batch order
 #   pairs  paired rescue on every known collapse: locate the onset, then 7 one-factor resumes from just before it
 #   rollback  the 5 known collapses, full runs with --rollback_on_collapse 3 (detect, go back >=150 steps, nudge 1e-4)
+#   rb_check  the recommended recipe (rollback on) on seeds 0-5 of kv / randomkv / hybrid: false triggers, cost, accuracy
 #   confirm_lr  LR 3e-4 on hybrid s0, s2 and randomkv s0, s1 (completes a 3x3 matrix with screen_lr)
 #   seeds_lr  seeds 3-5 of kv_jef / randomkv / hybrid with LR 3e-4 (6 seeds per config with screen_lr + confirm_lr)
 #   screen_lr / screen_fkv  collapse fixes, one factor each: adapter lr 3e-4 | --freeze_kg_v (kv s0-2, randomkv s2, hybrid s1)
 #   fresh  every trained adapter on a fresh test set (seed 7, no shared names) + no-warmup RAG runs
+#   factkg_more  FactKG seeds 1-2 of kv / randomkv, plus the paper's MiniLM KG2KV (kv_minilm) with its RandomKV control
+#   factkg  pilot on real claims: FactKG one-hop (data/factkg from scripts/factkg_convert.py, never committed), seed 0
 #   smoke  tiny CPU check that every code path runs (minutes)
+#   bench  300 training steps of kv and hybrid (speed of a new GPU type; compare secs in train_log.jsonl)
 #   gate   step 1: clean KV vs RandomKV, seed 0. Continue only if the clean loss separates.
 #   unf    KV vs RandomKV with the top 2 encoder layers trainable (as RAG trains them), seed 0
 #   rag    gate + trained RAG baseline, seed 0 (is the gap to RAG a Jef limit or a KV one?)
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|confirm_lr|seeds_lr|fresh|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -40,12 +44,54 @@ fi
 
 [ -f data/processed/test.json ] || $PY data/generate_benchmark.py
 
-train_eval () {  # name, train args...
+# JOBS=N: up to N jobs (train + eval, or eval) at once on this GPU (small model: one run leaves most of a 24 GB GPU
+# idle). Each job then logs to runs/<name>.log; a failed job prints FAILED and the stage goes on. A job also waits for
+# enough free GPU memory: peaks measured on a 3090 are ~5.2 GB for kv and ~9.6 GB for hybrid (4 jobs with hybrids OOMed).
+JOBS=${JOBS:-1}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}  # less fragmentation with several jobs
+trap '[ "$JOBS" -gt 1 ] && wait' EXIT
+gpu_free () { local f; f=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1); echo "${f:-999999}"; }
+run_job () {  # name, command...: throttled background job when JOBS > 1, else in the foreground
   local name=$1; shift
-  [ -f "runs/$name/eval.json" ] && { echo "skip $name (done)"; return; }
-  [ -f "runs/$name/adapter.pt" ] || $PY scripts/train.py "$@" --save_dir "runs/$name"
-  $PY scripts/eval.py --run "runs/$name"
+  if [ "$JOBS" -gt 1 ]; then
+    local need=6500; [[ "$*" == *hybrid* || "$*" == *rag* ]] && need=11000  # MiB; ponytail: by name, not measured per job
+    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ] || { [ "$(jobs -rp | wc -l)" -gt 0 ] && [ "$(gpu_free)" -lt $need ]; }; do wait -n || true; done
+    mkdir -p runs
+    # evals of the full KG peak higher than training (8-11 GB seen): a job that still OOMs retries (adapter.pt is kept)
+    ( for try in 1 2 3; do "$@" && exit 0; [ $try = 3 ] || { echo "retry $try"; sleep 240; }; done; exit 1 ) > "runs/$name.log" 2>&1 && echo "wrote runs/$name (job done)" || echo "FAILED $name (runs/$name.log)" &
+    sleep 60  # let the new job allocate its memory before the next free-memory check
+  else  # JOBS=1: same wrote/FAILED lines (the cloud runners fetch on "wrote"), the stage goes on after a failure
+    if "$@"; then echo "wrote runs/$name (job done)"; else echo "FAILED $name"; fi
+  fi
 }
+# One eval at a time per box: an eval on the full KG peaks at 8-14 GB (RandomKV more: keys + permuted values) and several at once OOMed;
+# evals are GPU-bound, so queueing them costs no throughput (3 at once = 3x slower each).
+gpu_eval () { if command -v flock >/dev/null; then flock /tmp/jefkv_eval.lock $PY scripts/eval.py "$@"; else $PY scripts/eval.py "$@"; fi; }
+train_and_eval () { [ -f "runs/$1/adapter.pt" ] || $PY scripts/train.py "${@:2}" --save_dir "runs/$1"; gpu_eval --run "runs/$1" ${EVAL_TEST:+--test "$EVAL_TEST"}; }
+train_eval () {  # name, train args...
+  local name=$1
+  [[ $name =~ ${ONLY:-.} ]] || { echo "skip $name (not in ONLY=$ONLY)"; return; }  # split a stage across machines
+  [ -f "runs/$name/eval.json" ] && { echo "skip $name (done)"; return; }
+  run_job "$name" train_and_eval "$@"
+}
+
+if [ "$STAGE" = rb_check ]; then  # the recommended recipe (rollback on collapse) on seeds 0-5 of every frozen-Jef config
+  for s in 0 1 2 3 4 5; do
+    train_eval hybrid_rbv_s$s --mode hybrid --seed $s --rollback_on_collapse 3  # slowest first
+    train_eval kv_jef_rbv_s$s --mode kv --seed $s --rollback_on_collapse 3
+    train_eval kv_jef_randomkv_rbv_s$s --mode kv --random_kv --seed $s --rollback_on_collapse 3
+  done
+  exit 0
+fi
+
+if [ "$STAGE" = bench ]; then  # speed on this GPU: kv, hybrid alone, then 4 kv runs at once (T4: ~7.6 it/s for kv)
+  for m in kv hybrid; do t=$(date +%s); $PY scripts/train.py --mode $m --steps 300 --save_dir runs_bench/$m; echo "bench $m alone: $(( $(date +%s) - t )) s"; done
+  t=$(date +%s)
+  for i in 1 2 3 4; do $PY scripts/train.py --mode kv --steps 300 --seed $i --save_dir runs_bench/kv_par$i > runs_bench/kv_par$i.log 2>&1 & done
+  wait; echo "bench 4 kv at once: $(( $(date +%s) - t )) s"
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+  exit 0
+fi
 
 if [ "$STAGE" = warm ]; then  # seeds that collapsed to 50/50 in full v1 (batch order = seed), with LR warmup
   train_eval kv_jef_nowarm_s2 --mode kv --seed 2 --warmup 0  # no warmup: does the collapse reproduce?
@@ -67,11 +113,33 @@ fi
 if [ "$STAGE" = fresh ]; then  # final adapters on a fresh test set (new entities) that no design decision saw
   for s in 0 1 2; do train_eval rag_nowarm_s$s --mode rag --seed $s --warmup 0; done
   [ -f data/fresh/test.json ] || $PY data/generate_benchmark.py --seed 7 --out_dir data/fresh       --exclude data/processed/train.json data/processed/test.json
+  wait  # JOBS > 1: the rag runs above must have finished
   for r in runs/*_s[0-9]; do
     n=$(basename "$r"); [ -f "$r/adapter.pt" ] || continue
-    [ -f "runs/fresh/$n/eval.json" ] || $PY scripts/eval.py --run "$r" --test data/fresh/test.json --out_dir "runs/fresh/$n"
+    [ -f "runs/fresh/$n/eval.json" ] || run_job "fresh_$n" gpu_eval --run "$r" --test data/fresh/test.json --out_dir "runs/fresh/$n"
   done
-  [ -f runs/fresh/zs_base/eval.json ] || $PY scripts/eval.py --zero_shot base --test data/fresh/test.json --out_dir runs/fresh/zs_base
+  [ -f runs/fresh/zs_base/eval.json ] || run_job fresh_zs_base gpu_eval --zero_shot base --test data/fresh/test.json --out_dir runs/fresh/zs_base
+  exit 0
+fi
+
+if [ "$STAGE" = factkg ]; then  # real claims, frozen Jef: is KV still causal (cf vs RandomKV), and does Jef know DBpedia without a KG?
+  F="--data data/factkg/train.json --rollback_on_collapse 3"; export EVAL_TEST=data/factkg/test.json
+  train_eval fk_hybrid_s0 --mode hybrid $F
+  train_eval fk_rag_s0 --mode rag $F
+  train_eval fk_kv_jef_s0 --mode kv $F
+  train_eval fk_kv_jef_randomkv_s0 --mode kv --random_kv $F
+  [ -f runs/fk_zs_base/eval.json ] || run_job fk_zs_base gpu_eval --zero_shot base --test $EVAL_TEST --out_dir runs/fk_zs_base
+  exit 0
+fi
+
+if [ "$STAGE" = factkg_more ]; then
+  F="--data data/factkg/train.json --rollback_on_collapse 3"; export EVAL_TEST=data/factkg/test.json
+  for s in 1 2; do
+    train_eval fk_kv_jef_s$s --mode kv --seed $s $F
+    train_eval fk_kv_jef_randomkv_s$s --mode kv --random_kv --seed $s $F
+  done
+  train_eval fk_kv_minilm_s0 --mode kv --kv_encoder minilm $F
+  train_eval fk_kv_minilm_randomkv_s0 --mode kv --kv_encoder minilm --random_kv $F
   exit 0
 fi
 
@@ -167,8 +235,9 @@ if [ "$STAGE" = full ]; then
     train_eval rag_nowarm_s$s --mode rag --seed $s --warmup 0  # RAG never collapsed: warmup can only cost it
     train_eval hybrid_s$s --mode hybrid --seed $s
   done
-  [ -f runs/zs_base/eval.json ] || $PY scripts/eval.py --zero_shot base
-  [ -f runs/zs_rag/eval.json ] || $PY scripts/eval.py --zero_shot rag
+  [ -f runs/zs_base/eval.json ] || run_job zs_base gpu_eval --zero_shot base
+  [ -f runs/zs_rag/eval.json ] || run_job zs_rag gpu_eval --zero_shot rag
 fi
 
+wait  # JOBS > 1
 $PY scripts/plot_results.py --runs runs --out_dir outputs
