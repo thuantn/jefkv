@@ -10,3 +10,6 @@ stage: `seeds_lr` Colab T4, `rb_check` / `fresh` / `factkg*` Vast.ai RTX 3090 (f
   its eval ran out of GPU memory three times and the box hit its time limit.
 - `seeds_lr/`: LR 3e-4, seeds 3–5.
 - `factkg*/`: FactKG (real DBpedia claims). Only metrics: the FactKG data (CC BY-NC-SA 4.0) is never stored here.
+  `factkg_s0/`: eval-only S0 of docs/PREREG_factkg.md on the FactKG adapters (kv_jef, hybrid s0-2; RAG s0-2 were
+  scored from per-claim predictions, not kept here) and `gates.txt` (every variant x population x seed, decisions).
+  `factkg_s0b/`: the post-hoc checks (hybrid with shuffled KV values, RAG with 6 trainable layers, 3 seeds each).

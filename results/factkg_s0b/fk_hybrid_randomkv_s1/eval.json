@@ -1,0 +1,116 @@
+{
+ "train_args": {
+  "data": "data/factkg/train.json",
+  "mode": "hybrid",
+  "kv_encoder": "jef",
+  "random_kv": true,
+  "save_dir": "runs/fk_hybrid_randomkv_s1",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 200,
+  "unfreeze_top": 0,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 1,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 1,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "hybrid_dense_k3": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 98.11,
+    "avg_ms": 55.03,
+    "p95_ms": 55.61,
+    "acc": 95.57,
+    "ece": 0.0254,
+    "acc_label_true": 96.56,
+    "acc_label_false": 94.36,
+    "retrieval": {
+     "3": {
+      "acc@1": 26.69,
+      "acc@5": 61.24,
+      "score_acc@5": 62.44
+     },
+     "6": {
+      "acc@1": 26.26,
+      "acc@5": 52.77,
+      "score_acc@5": 28.66
+     },
+     "9": {
+      "acc@1": 25.31,
+      "acc@5": 52.64,
+      "score_acc@5": 17.28
+     },
+     "12": {
+      "acc@1": 26.26,
+      "acc@5": 52.6,
+      "score_acc@5": 28.02
+     },
+     "15": {
+      "acc@1": 25.83,
+      "acc@5": 53.59,
+      "score_acc@5": 15.69
+     },
+     "18": {
+      "acc@1": 26.64,
+      "acc@5": 58.01,
+      "score_acc@5": 22.91
+     },
+     "21": {
+      "acc@1": 27.07,
+      "acc@5": 52.34,
+      "score_acc@5": 25.1
+     }
+    },
+    "recall": {
+     "@1": 34.64,
+     "@5": 67.94,
+     "@16": 81.01,
+     "true@1": 36.72,
+     "true@5": 73.12,
+     "true@16": 85.47,
+     "false@1": 32.09,
+     "false@5": 61.6,
+     "false@16": 75.55
+    },
+    "recall_rag": {
+     "@3": 87.54,
+     "true@3": 97.66,
+     "false@3": 75.17
+    },
+    "cf": {
+     "pair_acc": 63.77,
+     "flip_rate": 63.94,
+     "n": 2327,
+     "pair_acc_ci95": 1.95,
+     "pair_acc_label_true": 41.64,
+     "pair_acc_label_false": 90.83,
+     "gold_retrieved": 64.37
+    }
+   }
+  }
+ }
+}

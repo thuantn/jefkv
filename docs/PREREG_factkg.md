@@ -85,3 +85,15 @@ Rollback restarts and collapses are counted and reported per run; no seed is dro
 - **Decision: Stop** (a deviation, see above). No S2 training. The result is negative for this recipe: on FactKG the
   KV memory alone does not beat RAG on accuracy or on faithfulness to an edited fact (also not with oracle routing on
   ALL), and the hybrid's gain over RAG comes mostly through its retrieved text, not through the KG facts in its KV.
+
+## Post-hoc checks (26/11/2026, `run_all.sh factkg_s0b`, 3 seeds each, `results/factkg_s0b`)
+| (ALL, 2,327 claims) | acc | cf pair acc |
+|---|---|---|
+| RAG, 2 unfrozen layers (registered baseline) | 91.5 | 50.8 |
+| RAG, 6 unfrozen layers | 96.0 (95.8-96.1) | 60.7 (60.0-61.1) |
+| hybrid, real KG | 96.2 (95.7-96.7) | 61.6 (57.3-64.2) |
+| hybrid trained with shuffled KV values | 95.6 (95.5-95.8) | 62.8 (62.2-63.8) |
+
+The hybrid with a meaningless KV (values shuffled) matches the real one, and a RAG with more trainable layers matches
+both. The hybrid's lead over the registered RAG baseline is adapter capacity, not KG knowledge read from the KV.
+No rollback fired in these six runs.

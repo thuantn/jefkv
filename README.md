@@ -2,11 +2,16 @@
 
 **JefKV** is a personal research proof-of-concept. It asks whether **AtlasKV-style parametric KG memory** (Huang et al., ICLR 2026) helps a compact, bidirectional **System-1 decision model**, [Decision-Jef-0.1](https://huggingface.co/BarraHome/Decision-Jef-0.1) (307M, mmBERT-base / ModernBERT), decide rule-dependent cases, and where it does better or worse than plain retrieval-augmented prompting (RAG). It is an independent project, not affiliated with or endorsed by the authors of Decision-Jef or AtlasKV.
 
-> **Status:** 3-seed results for every configuration and seeds 3–5 for the frozen-Jef ones (T4). The training collapse has a workaround but no explanation (see "Training collapse": rollback on collapse trained all 5 known collapsing seeds, one of them 2.7 points below the other runs of its configuration). A re-evaluation on a fresh test set and rollback on never-collapsed seeds are pending, and this README will be updated with them. Numbers in "Changes" are from development gate runs.
+> **Status (26/11/2026):** on the synthetic benchmark JefKV beats a 2-layer RAG baseline, and the results hold on a fresh test set and with the recommended recipe on seeds 0–5. **On real data (FactKG) the result is negative**: JefKV alone stays below RAG, and the hybrid's lead over RAG disappears against a RAG with more trainable layers and is matched by a hybrid whose KV values are shuffled (see "Real data: FactKG"). The synthetic KV-vs-RAG gap may share that capacity confound; it was not tested there. The training collapse has a workaround but no explanation. Numbers in "Changes" are from development gate runs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/results_dark.svg">
-  <img alt="OOD accuracy: hybrid 97.2, JefKV 84.6, best RAG 79.0, RandomKV 65.4, zero-shot 51.9. Counterfactual pair accuracy: hybrid 94.5, JefKV 59.4, best RAG 44.6, RandomKV 8.5." src="docs/results_light.svg">
+  <img alt="Synthetic benchmark, every run counted. OOD accuracy: hybrid 97.2, JefKV 85.2, best RAG 79.0, RandomKV 64.4, zero-shot 51.9. Counterfactual pair accuracy: hybrid 94.3, JefKV 58.9, best RAG 44.6, RandomKV 7.9." src="docs/results_light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/factkg_dark.svg">
+  <img alt="FactKG, 3 seeds. Accuracy: hybrid 96.2, hybrid with shuffled KV 95.6, RAG with 6 trainable layers 96.0, RAG with 2 trainable layers 91.5, JefKV 81.4, string-match rule 77.1, RandomKV 71.7, zero-shot 55.0. Counterfactual pair accuracy: hybrid 61.6, shuffled-KV hybrid 62.8, RAG 6 layers 60.7, RAG 2 layers 50.8, JefKV 28.0, RandomKV 7.8." src="docs/factkg_light.svg">
 </picture>
 
 ## What is combined
@@ -83,9 +88,9 @@ Mean ± std over seeds 0–2 on the held-out splits (1,000 OOD cases, 500 per ot
 
 What this says:
 1. **The frozen-Jef KV memory uses the knowledge.** cf pair 58% vs 10% for RandomKV and 0% for AtlasKV's own MiniLM KG2KV (which only learns the ~60% case-only prior).
-2. **KV vs RAG (compared with RAG's better recipe):** KV is +5.4 pts on OOD (84.4 vs 79.0) and reads the retrieved fact more reliably (cf 58 vs 45); on rules that must be combined (`multi`) it is +2.2 over the best RAG row on that split (dense k=3, no warmup). RAG stays better on alias names (67.2 vs 65.9), as expected from a text retriever, and is ~3–4× faster (30–44 vs 115 ms per case).
-3. **Both together (`hybrid`) is the strongest when it trains** (97% OOD, 94% cf) but collapsed in 1 of 3 runs in each recipe on seeds 0–2 (none of seeds 3–5).
-4. **Missing rules (RQ3):** no method reaches the ideal 50% confidence on `trap` cases; KV-based models separate rule-present from rule-missing cases better (abstention AUROC 0.68–0.71 for KV, 0.95 for the hybrid runs that trained, vs 0.55–0.65 for RAG).
+2. **KV vs RAG (compared with RAG's better recipe):** KV is +5.4 pts on OOD (84.4 vs 79.0) and reads the retrieved fact more reliably (cf 58 vs 45); on rules that must be combined (`multi`) it is +2.2 over the best RAG row on that split (dense k=3, no warmup). RAG stays better on alias names (67.2 vs 65.9), as expected from a text retriever, and is ~3–4× faster (30–44 vs 115 ms per case). Caveat: RAG trains 2 encoder layers, KV an 11.2M adapter; on FactKG that capacity gap alone explained the hybrid's lead (see Limitations).
+3. **Both together (`hybrid`) is the strongest when it trains** (97% OOD, 94% cf) but collapsed in 1 of 3 runs in each recipe on seeds 0–2 (none of seeds 3–5). On FactKG a hybrid with shuffled KV values did as well as the real one, so its edge there came from capacity, not from the KV facts; the synthetic hybrid was not tested that way.
+4. **Missing rules (RQ3):** no method reaches the ideal 50% confidence on `trap` cases; KV-based models separate rule-present from rule-missing cases better (abstention AUROC 0.68–0.71 for KV, 0.95 for the hybrid runs that trained, vs 0.55–0.65 for RAG). Caveat: half of the temperature head's inputs (λ_kg, set by a static gate) are constant for a given model, so this rests on the max-triple-probability features; the AUROC uses OOD vs trap only.
 5. **Pruning:** the K-Means-pruned KV variant (top 8 of 128 clusters on pooled keys) drops the gold triple before routing (layer-3 ACC@5 27% vs 88%): OOD 61.8%, i.e. no knowledge. It halves latency but is not usable as built.
 
 **Cost compared with stock Jef.** Measured on this repo's setup (latency = mean per case in `scripts/eval.py` on a T4, fp16):
@@ -128,13 +133,46 @@ The memory grows linearly with the KG, so a KG much larger than ~10K triples nee
 
 Per-seed numbers are in each `runs/<config>_s<seed>/eval.json`; `bash run_all.sh full` also writes means to `outputs/results.md` and plots. The no-warmup RAG rows come from `rag_nowarm_s*` (same stage).
 
+**Fresh test set** (`bash run_all.sh fresh`, `results/fresh/`): the adapters above, re-evaluated on a new synthetic test set (generator seed 7, no entity name shared with train or the original test). OOD acc / cf pair: `kv_jef` 84.9 ± 1.2 / 57.8 (3 seeds), best RAG (BM25, no warmup) 80.1 ± 0.8 / 48.3, `kv_jef_unf2` 86.5 / 63.6, hybrid 98.0 / 96.4 and 97.6 / 94.7 (s1 is the collapsed run: 51.0), RandomKV 62.2 / 7.6, AtlasKV MiniLM KG2KV 62.0 / 0.0, zero-shot 50.7. The design decisions made on the original test split did not inflate the KV numbers.
+
+**Recommended recipe on seeds 0–5** (`--rollback_on_collapse 3`, `bash run_all.sh rb_check`, `results/rb_check/`, RTX 3090 fp16): every run counted, none dropped. `kv_jef` 85.2 ± 0.5 OOD / 58.9 ± 2.1 cf (6 seeds), hybrid 97.2 ± 0.7 / 94.3 ± 1.3 (6), RandomKV 64.4 ± 1.1 / 7.9 ± 3.2 (5; s4's eval ran out of GPU memory three times). One rollback fired in 17 runs (RandomKV s2) and no run collapsed. The seeds that collapsed on the T4 (hybrid s1, RandomKV s2) did not collapse here the same way: the GPU changes the numerics, so a seed's trajectory does not carry over between GPUs, and this is not an out-of-sample test of the rollback rule. The headline figure uses these numbers.
+
+## Real data: FactKG (negative result)
+
+[FactKG](https://github.com/jiho283/FactKG) (Kim et al., ACL 2023, [arXiv:2305.06590](https://arxiv.org/abs/2305.06590)) has claims about DBpedia entities labelled True / False. The converter (`scripts/factkg_convert.py`) keeps one-hop claims with two entities and one relation, takes the claim's triples plus same-entity distractors as the KG (train 11,353 claims / 25,700 triples; test = FactKG dev, 2,327 claims / 4,883 triples) and picks, per claim, a real tail that flips the label for the counterfactual. Same recipe, same budget and same eval as the synthetic runs. **The FactKG data (CC BY-NC-SA 4.0; KG: DBpedia 2015, CC BY-SA 3.0) is not in this repo**, only metrics (`results/factkg*`).
+
+A critical review of this repo (confounds: adapter capacity, the hybrid's selector reading the RAG text, retriever mismatch, a training shortcut, duplicate gold rows, a biased oracle) and two rounds of model cross-review turned into a plan with decision rules fixed before running: [docs/PREREG_factkg.md](docs/PREREG_factkg.md) (with its deviations and outcome). 3 seeds each, all runs counted:
+
+| (2,327 test claims) | acc | cf pair | notes |
+|---|---|---|---|
+| zero-shot Jef | 55.0 | – | answers True almost always |
+| string-match rule (`scripts/factkg_rule_baseline.py`) | 77.1 | – | True iff a KG triple's head and tail both occur in the claim |
+| RandomKV | 71.7 ± 0.6 | 7.8 ± 1.4 | |
+| **JefKV** (`kv_jef`) | **81.4 ± 0.2** | **28.0 ± 1.0** | the deciding triple is in the selector's top-16 for 55% of claims (seed 2; True 69%, False 39%) |
+| JefKV, gold forced into its top-16 (oracle) | 88.1 | 41.4 | the reader's ceiling with this training recipe |
+| RAG dense k=3, 2 trainable layers (as on synthetic) | 91.5 ± 0.3 | 50.8 ± 0.6 | |
+| hybrid (RAG text + KV) | 96.2 ± 0.4 | 61.6 ± 3.1 | |
+| hybrid, cf edit applied to the KV only / text only | – | 1.4 / 58.4 | the hybrid follows its text, not its KV |
+| hybrid trained with shuffled KV values | 95.6 ± 0.1 | 62.8 ± 0.7 | post-hoc check |
+| RAG dense k=3, 6 trainable layers | 96.0 ± 0.1 | 60.7 ± 0.5 | post-hoc check |
+
+What this says:
+1. **JefKV alone loses to RAG on real data**, on accuracy and on following an edited fact, and is only 4 points above string matching. Even with the gold triples forced into its top-16 it stays below RAG (88.1 / 41.4 vs 91.5 / 50.8). The frozen layer-3 selector has the deciding triple in its top-16 for only 55% of the claims.
+2. **The hybrid's lead over RAG is adapter capacity, not KG knowledge.** Editing a fact only in the hybrid's KV moves 1.4% of the counterfactual pairs; editing only its retrieved text gives 58.4 of the 62.0. A hybrid trained with shuffled KV values does as well as the real one, and a RAG with 6 trainable layers matches both. The hybrid's encoder is frozen, so its KV branch (11.2M parameters in 7 layers, at 50× RAG's learning rate) works as a text-conditioned adapter with the KG states as a fixed basis.
+3. **Scale and latency** (seed 0, KG grown with unrelated real triples, RTX 3090): RAG stays at 91.5% and ~24 ms per claim from 5k to 50k triples; the hybrid keeps its accuracy (96.7 → 96.5) but goes from 75 to 223 ms at 20k triples and runs out of GPU memory (24 GB) at 50k, as does RandomKV. The layer-3 selector scores every triple, so cost grows with the KG.
+4. **Not ruled out:** a reader trained with hard negatives (same-entity distractors in the training KG), a trained selector, or a validation-tuned RAG. Training batches now draw distractors at random, so "is the claimed tail anywhere in the KV" nearly solves training, and the string-match rule shows how far that goes.
+
+Details: `results/factkg_s0/gates.txt` (per seed, population and variant, incl. the claims RAG misses and claims with unseen head entities: same picture), `results/factkg_s0b/`. Caveats: no validation split (S0 was decided on the test split), 79/2,327 test claims had a duplicated gold row in the data used (the converter is fixed, the data not regenerated; the eval edits every duplicate), 364 test claims have their gold triple in the train KG.
+
 ## Limitations (read before citing a number)
 
-- **No separate validation split.** The design decisions in "Changes" (gate runs 1–9) were made by looking at the test split, so the KV numbers above are optimistic for this design. A re-evaluation of the final adapters on a fresh test set (new entities, different generator seed) is reported below when available.
+- **Adapter capacity confound (synthetic).** RAG trains its top 2 encoder layers at LR 2e-5; KV and hybrid train an 11.2M-parameter adapter in 7 layers at 1e-3. On FactKG this gap alone explained the hybrid's lead (a RAG with 6 trainable layers matched it). The synthetic KV-vs-RAG and hybrid-vs-RAG gaps were not re-tested with a capacity-matched RAG, so read them as upper bounds of what the memory adds.
+
+- **No separate validation split.** The design decisions in "Changes" (gate runs 1–9) were made by looking at the test split. The re-evaluation on a fresh test set (new entities, different generator seed, see "Results") gave the same numbers.
 - **Synthetic, single-family task.** One kind of rule (is the observed number within an entity's limit), 4 domains, English pseudo-word entities. Values at the edges of a domain's range give the label without any knowledge, which is why models with no access to the KG reach ~60% (RandomKV, MiniLM KG2KV) and why the counterfactual `cf pair` metric is reported.
 - **RandomKV is a conservative control.** It shuffles values only (AtlasKV App. E); its keys still contain each triple's own tail tokens, so a weak key-side channel remains (its cf pair is 10%, not 0%). This can only make the control stronger, i.e. shrink KV's measured advantage.
 - **Training exposure differs.** KV training batches always contain the gold triples plus a growing set of distractors (AtlasKV's curriculum); RAG trains on what its retriever returns (dense k=3, ~97% gold recall on OOD). At test time both use the same full 10K-triple KG.
-- **Hybrid cf is not KV-only.** In the hybrid, a counterfactual edit changes both the KV memory and the retrieved sentence, so its cf (≈94) cannot be attributed to the KV memory alone.
+- **Hybrid cf is not KV-only.** In the hybrid, a counterfactual edit changes both the KV memory and the retrieved sentence, so its cf (≈94) cannot be attributed to the KV memory alone. On FactKG an edit of the KV alone moved 1.4% of the pairs (see "Real data: FactKG"); the synthetic hybrid was not split this way.
 - **Plug-in holds exactly only without a KG.** With no KG passed, a KV model is exactly stock Jef (self-test). A trained adapter given a KG whose slots are all masked still applies its learned temperature (factor 1.027 for `kv_jef` seed 1), so its logits differ slightly from stock Jef.
 - **cf asymmetry.** For RAG the edited tail replaces the gold sentence only if the unedited index retrieved it; for KV the edited triple is re-encoded in memory and re-scored. The edit only changes the tail number, which is not in the query, so retrieval is expected to be essentially unchanged.
 - **One backbone, small seeds count.** 3 seeds per configuration (plus seeds 3–5 for the frozen-Jef ones); 2 of 18 frozen-Jef runs with warmup collapsed (see above).
@@ -205,7 +243,8 @@ This project builds directly upon the following papers, architectures, and open-
 6. **Sentence-BERT & MiniLM (Default Lightweight Sentence Encoder):**
    - Nils Reimers and Iryna Gurevych. *Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks*. 2019 ([arXiv:1908.10084](https://arxiv.org/abs/1908.10084)).
    - Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou. *MiniLM: Deep Self-Attention Distillation for Task-Agnostic Compression of Pre-Trained Transformers*. **NeurIPS 2020** ([Hugging Face: all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)).
-7. **Core Foundations (Transformer & AdamW):**
+7. **FactKG (Real-Data Benchmark):** Jiho Kim, Sungjin Park, Yeonsu Kwon, Yohan Jo, James Thorne, and Edward Choi. *FactKG: Fact Verification via Reasoning on Knowledge Graphs*. **ACL 2023**, pp. 16190–16206 ([ACL Anthology](https://aclanthology.org/2023.acl-long.895/) | [arXiv:2305.06590](https://arxiv.org/abs/2305.06590) | [GitHub](https://github.com/jiho283/FactKG)). Data CC BY-NC-SA 4.0, not redistributed here.
+8. **Core Foundations (Transformer & AdamW):**
    - Ashish Vaswani et al. *Attention is All You Need*. **NeurIPS 2017**.
    - Ilya Loshchilov and Frank Hutter. *Decoupled Weight Decay Regularization*. 2017 ([arXiv:1711.05101](https://arxiv.org/abs/1711.05101)).
 
