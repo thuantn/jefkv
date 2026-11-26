@@ -2,7 +2,7 @@
 # Run run_all.sh stage(s) on one rented Vast.ai GPU, fetch the results after every finished job, destroy the instance.
 #   pip install vastai                     # CLI; an SSH public key must be registered on the Vast account
 #   VAST_ENV=<file with VAST_API_KEY=...> VAST_KEY=<ssh private key> bash vast/run_stage.sh "smoke bench" [RTX_3090]
-# Env: JOBS=N (jobs at once on the GPU, see run_all.sh; the offer then needs >= 2 CPU cores per job), ONLY=<regex>
+# Env: ONLY_GEO=<regex> (rent only there; PREFER_GEO only sorts), JOBS=N (jobs at once on the GPU, see run_all.sh; the offer then needs >= 2 CPU cores per job), ONLY=<regex>
 #      (split a stage across machines), JEFKV_AMP (default fp16 = the T4 numerics of every published run; bf16-capable
 #      GPUs would otherwise switch to bf16), UPLOAD_RUNS=<local dir of run dirs with adapter.pt> (copied to runs/, e.g.
 #      for `fresh`), MAX_DPH (max $/h, default 0.30), MAX_HOURS (default 6), KEEP_ADAPTERS=1 (also fetch adapter.pt),
@@ -48,6 +48,9 @@ d = [o for o in json.load(open(sys.argv[1], encoding="utf-8"))
 # PREFER_GEO=<regex on the location, e.g. "VN|TH|TW|SG">: those offers first (uploads from Vietnam to Turkey ran at
 # ~90 KB/s, to a Vietnamese host at ~6.7 MB/s)
 pref = os.environ.get("PREFER_GEO")
+only = os.environ.get("ONLY_GEO")  # strict: never rent elsewhere (a far box can take ~50 min to upload 250 MB of adapters)
+if only:
+    d = [o for o in d if re.search(only, o.get("geolocation") or "")]
 if pref:
     d.sort(key=lambda o: (not re.search(pref, o.get("geolocation") or ""), o["dph_total"]))
 for o in d[:4]:

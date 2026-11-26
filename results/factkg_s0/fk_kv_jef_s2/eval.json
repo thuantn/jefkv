@@ -1,0 +1,224 @@
+{
+ "train_args": {
+  "data": "data/factkg/train.json",
+  "mode": "kv",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/fk_kv_jef_s2",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 200,
+  "unfreeze_top": 0,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 2,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 2,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "kv_full": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 89.21,
+    "avg_ms": 48.01,
+    "p95_ms": 48.56,
+    "acc": 81.09,
+    "ece": 0.0811,
+    "acc_label_true": 80.39,
+    "acc_label_false": 81.95,
+    "retrieval": {
+     "3": {
+      "acc@1": 19.68,
+      "acc@5": 41.17,
+      "score_acc@5": 41.34
+     },
+     "6": {
+      "acc@1": 19.64,
+      "acc@5": 36.44,
+      "score_acc@5": 11.69
+     },
+     "9": {
+      "acc@1": 20.33,
+      "acc@5": 35.54,
+      "score_acc@5": 10.74
+     },
+     "12": {
+      "acc@1": 20.07,
+      "acc@5": 38.03,
+      "score_acc@5": 20.63
+     },
+     "15": {
+      "acc@1": 19.85,
+      "acc@5": 37.9,
+      "score_acc@5": 11.52
+     },
+     "18": {
+      "acc@1": 19.55,
+      "acc@5": 37.69,
+      "score_acc@5": 16.72
+     },
+     "21": {
+      "acc@1": 19.77,
+      "acc@5": 38.33,
+      "score_acc@5": 24.5
+     }
+    },
+    "recall": {
+     "@1": 21.74,
+     "@5": 43.4,
+     "@16": 55.44,
+     "true@1": 30.39,
+     "true@5": 58.05,
+     "true@16": 69.06,
+     "false@1": 11.17,
+     "false@5": 25.5,
+     "false@16": 38.78
+    },
+    "cf": {
+     "pair_acc": 27.16,
+     "flip_rate": 27.55,
+     "n": 2327,
+     "pair_acc_ci95": 1.81,
+     "pair_acc_label_true": 12.89,
+     "pair_acc_label_false": 44.6
+    }
+   }
+  },
+  "kv_oracle": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 92.23,
+    "avg_ms": 47.47,
+    "p95_ms": 47.92,
+    "acc": 87.71,
+    "ece": 0.0452,
+    "acc_label_true": 96.09,
+    "acc_label_false": 77.46,
+    "retrieval": {
+     "3": {
+      "acc@1": 27.89,
+      "acc@5": 95.19,
+      "score_acc@5": 41.34
+     },
+     "6": {
+      "acc@1": 34.16,
+      "acc@5": 94.11,
+      "score_acc@5": 19.12
+     },
+     "9": {
+      "acc@1": 39.62,
+      "acc@5": 93.43,
+      "score_acc@5": 12.76
+     },
+     "12": {
+      "acc@1": 35.02,
+      "acc@5": 97.38,
+      "score_acc@5": 45.17
+     },
+     "15": {
+      "acc@1": 36.27,
+      "acc@5": 96.39,
+      "score_acc@5": 19.77
+     },
+     "18": {
+      "acc@1": 38.85,
+      "acc@5": 94.89,
+      "score_acc@5": 28.88
+     },
+     "21": {
+      "acc@1": 43.7,
+      "acc@5": 96.43,
+      "score_acc@5": 48.13
+     }
+    },
+    "cf": {
+     "pair_acc": 39.75,
+     "flip_rate": 40.14,
+     "n": 2327,
+     "pair_acc_ci95": 1.99,
+     "pair_acc_label_true": 21.41,
+     "pair_acc_label_false": 62.18
+    }
+   }
+  },
+  "kv_oracle_goldonly": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 93.33,
+    "avg_ms": 47.32,
+    "p95_ms": 48.12,
+    "acc": 85.39,
+    "ece": 0.0794,
+    "acc_label_true": 97.97,
+    "acc_label_false": 70.01,
+    "retrieval": {
+     "3": {
+      "acc@1": 82.72,
+      "acc@5": 98.15,
+      "score_acc@5": 98.28
+     },
+     "6": {
+      "acc@1": 82.94,
+      "acc@5": 98.11,
+      "score_acc@5": 96.95
+     },
+     "9": {
+      "acc@1": 82.68,
+      "acc@5": 97.59,
+      "score_acc@5": 97.64
+     },
+     "12": {
+      "acc@1": 82.81,
+      "acc@5": 98.24,
+      "score_acc@5": 98.71
+     },
+     "15": {
+      "acc@1": 82.68,
+      "acc@5": 98.07,
+      "score_acc@5": 98.07
+     },
+     "18": {
+      "acc@1": 82.51,
+      "acc@5": 98.02,
+      "score_acc@5": 98.5
+     },
+     "21": {
+      "acc@1": 82.81,
+      "acc@5": 98.24,
+      "score_acc@5": 96.86
+     }
+    },
+    "cf": {
+     "pair_acc": 40.95,
+     "flip_rate": 41.3,
+     "n": 2327,
+     "pair_acc_ci95": 2.0,
+     "pair_acc_label_true": 22.27,
+     "pair_acc_label_false": 63.8
+    }
+   }
+  }
+ }
+}

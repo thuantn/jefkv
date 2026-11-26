@@ -22,7 +22,8 @@ New eval variants (`scripts/eval.py --diag`):
   confidence/ECE of these variants are not comparable; accuracy and cf are.
 - `hybrid_qclaim_cfkv` / `hybrid_qclaim_cfrag`: the counterfactual edit reaches only the KV path / only the text path.
 - `kv_oracle`, `hybrid_oracle`: gold triples forced into the KV top-16 with the prior of the natural top-1 (the old
-  oracle gave them a negative prior: a lower bound). `kv_oracle_goldonly`: the KV holds only the gold triples.
+  oracle gave them a negative prior: a lower bound); `hybrid_oracle` also puts them first in the retrieved text.
+  `kv_oracle_goldonly`: the KV holds only the gold triples.
 - Per-claim predictions in `preds_<variant>.jsonl` (subsets and paired bootstrap without re-running).
 
 Populations: ALL (2,327 claims), RAG-MISS (claims where the trained RAG's dense top-3 does not contain the deciding
@@ -52,4 +53,35 @@ disjoint from train and test.
 Rollback restarts and collapses are counted and reported per run; no seed is dropped.
 
 ## Changes after registration
-(none yet)
+- 26/11/2026, after S0: the Stop rule needed K = "reader", but no K branch fired (on ALL; the rules did not name the
+  population for K: on RAG-MISS `kv_oracle_goldonly` is 74.3 < 85, on UNSEEN-HEAD 85.8). We stop anyway (reason in the
+  Outcome) and record it here as a deviation.
+- 26/11/2026, after S0, before running them: two post-hoc checks of the Outcome's explanation, 3 seeds each, same data
+  and recipe (`run_all.sh factkg_s0b`): hybrid trained with shuffled KV values (does the hybrid use the KG facts, or the
+  KV branch only as a text-conditioned adapter?) and RAG with 6 unfrozen layers (is the hybrid's lead adapter capacity?).
+  Reported as post-hoc, not as a registered test.
+
+## Outcome of S0 (26/11/2026, 3 seeds each; numbers: `results/factkg_s0/gates.txt`)
+- **H: FAIL.** On RAG-MISS (290 claims): `hybrid_qclaim` acc 92.3 vs `rag_dense_k3` 89.2 (+3.1, rule: +5);
+  `hybrid_qclaim_cfkv` pair accuracy 2.1 (rule: >= 25). Editing only the KV changes the hybrid's answer on ~1-2% of
+  pairs (pair accuracy 1.4, flip rate 1.3-2.4 per seed, ALL), editing only the retrieved text gives almost the whole
+  effect (58.4 vs 62.0 for both). The remaining 3.6 points (5.4 on RAG-MISS, positive on every seed) show a small KV
+  effect once the text agrees with the edit: the hybrid reads the retrieved text predominantly, the KV facts very little.
+  The claim-only selector mask changes nothing (96.3 vs 96.2 acc), so "the selector reads the RAG text" does not
+  explain the hybrid either. The hybrid's lead over RAG (ALL: 96.2 vs 91.5 acc, 61.6 vs 50.8 cf) therefore comes mostly
+  through the text path. The hybrid's encoder is frozen: its only trainable weights are the KV branch (W_Q/K/V of the KG
+  in 7 layers), so the likely mechanism is the KV branch acting as a text-conditioned adapter with the KG states as a
+  fixed basis, trained at 50x RAG's learning rate. That is an explanation, not a measurement (see the post-hoc checks).
+- RAG-MISS caveat: it is defined on the unedited pass; on a False claim's edited pass the re-indexed retriever can find
+  the edited row (its new tail is the claimed one), so RAG keeps 58.3 cf there (50.8 on ALL).
+- **K: no branch fires.** `kv_oracle` - `kv_full` = 88.1 - 81.4 = 6.7 (rule: >= 10), `kv_oracle_goldonly` - `kv_oracle`
+  = -1.0 (rule: >= 5), `kv_oracle_goldonly` = 87.1 (rule: < 85 for "reader"). The rules did not say what to do when
+  none fires (a gap in this registration). Read literally, there is no S2 branch for pure KV. In substance: with
+  perfect eval-time routing the KV reader of this recipe (frozen encoder, random distractors in training) reaches
+  88.1 acc / 41.4 cf, still below the trained RAG (91.5 / 50.8). A reader trained differently (hard negatives) is not
+  ruled out by this. `kv_oracle_goldonly` puts all KG attention on 1 triple for True claims (a setting never seen in
+  training), so its lower accuracy is partly an artefact; its cf (45.4; 52.5 on seed 1) is the best pure-KV number.
+  UNSEEN-HEAD gives the same picture (kv_full 79.3 / 30.0, kv_oracle 87.0 / 42.2, rag 89.5 / 55.0, hybrid_qclaim_cfkv 1.5).
+- **Decision: Stop** (a deviation, see above). No S2 training. The result is negative for this recipe: on FactKG the
+  KV memory alone does not beat RAG on accuracy or on faithfulness to an edited fact (also not with oracle routing on
+  ALL), and the hybrid's gain over RAG comes mostly through its retrieved text, not through the KG facts in its KV.
