@@ -43,9 +43,10 @@ def gold_set(s):
 
 
 def pass_gold(s, label):
-    """Gold ids that decide one pass of a claim (the cf swapped pass has the flipped label), decisive one first."""
+    """Gold ids that decide one pass of a claim (the cf swapped pass has the flipped label), decisive one first.
+    Real data (cf_tail): a True claim rests on gold_idx[0] only. Synthetic: every gold rule decides (multi needs both)."""
     g = list(s.get("gold_idx") or [])
-    return g[:1] if label else g
+    return g[:1] if (label and "cf_tail" in s) else g
 
 
 def sel_layer(model):
