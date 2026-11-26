@@ -1,0 +1,339 @@
+{
+ "train_args": {
+  "data": "data/processed/train.json",
+  "mode": "kv",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/kv_jef_unf6_rbv_s0",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 200,
+  "unfreeze_top": 6,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "kg_store": "",
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 0,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 0,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "kv_full": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 81.74,
+    "avg_ms": 112.27,
+    "p95_ms": 123.88,
+    "acc": 85.4,
+    "ece": 0.0579,
+    "retrieval": {
+     "3": {
+      "acc@1": 73.2,
+      "acc@5": 88.4,
+      "score_acc@5": 88.4
+     },
+     "6": {
+      "acc@1": 73.7,
+      "acc@5": 90.7,
+      "score_acc@5": 32.0
+     },
+     "9": {
+      "acc@1": 72.7,
+      "acc@5": 90.1,
+      "score_acc@5": 39.6
+     },
+     "12": {
+      "acc@1": 73.4,
+      "acc@5": 88.8,
+      "score_acc@5": 31.6
+     },
+     "15": {
+      "acc@1": 73.5,
+      "acc@5": 88.7,
+      "score_acc@5": 31.3
+     },
+     "18": {
+      "acc@1": 73.1,
+      "acc@5": 89.8,
+      "score_acc@5": 36.3
+     },
+     "21": {
+      "acc@1": 73.5,
+      "acc@5": 89.1,
+      "score_acc@5": 36.0
+     }
+    },
+    "cf": {
+     "pair_acc": 60.5,
+     "flip_rate": 61.0,
+     "n": 1000,
+     "pair_acc_ci95": 3.03,
+     "pair_acc_label_true": 69.36,
+     "pair_acc_label_false": 52.22
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 82.27,
+    "avg_ms": 125.68,
+    "p95_ms": 133.0,
+    "acc": 67.2,
+    "ece": 0.1615,
+    "retrieval": {
+     "3": {
+      "acc@1": 42.6,
+      "acc@5": 75.0,
+      "score_acc@5": 75.0
+     },
+     "6": {
+      "acc@1": 42.8,
+      "acc@5": 76.6,
+      "score_acc@5": 26.6
+     },
+     "9": {
+      "acc@1": 46.0,
+      "acc@5": 76.8,
+      "score_acc@5": 35.8
+     },
+     "12": {
+      "acc@1": 43.8,
+      "acc@5": 73.8,
+      "score_acc@5": 28.8
+     },
+     "15": {
+      "acc@1": 44.8,
+      "acc@5": 75.2,
+      "score_acc@5": 27.8
+     },
+     "18": {
+      "acc@1": 44.0,
+      "acc@5": 77.2,
+      "score_acc@5": 24.2
+     },
+     "21": {
+      "acc@1": 42.8,
+      "acc@5": 76.8,
+      "score_acc@5": 34.6
+     }
+    }
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 75.11,
+    "avg_ms": 114.94,
+    "p95_ms": 126.11,
+    "acc": 67.2,
+    "ece": 0.0791,
+    "retrieval": {
+     "3": {
+      "acc@1": 19.0,
+      "acc@5": 29.0,
+      "score_acc@5": 29.0
+     },
+     "6": {
+      "acc@1": 18.8,
+      "acc@5": 32.2,
+      "score_acc@5": 9.8
+     },
+     "9": {
+      "acc@1": 19.0,
+      "acc@5": 30.8,
+      "score_acc@5": 14.6
+     },
+     "12": {
+      "acc@1": 19.4,
+      "acc@5": 29.2,
+      "score_acc@5": 11.8
+     },
+     "15": {
+      "acc@1": 19.2,
+      "acc@5": 29.0,
+      "score_acc@5": 11.8
+     },
+     "18": {
+      "acc@1": 19.2,
+      "acc@5": 29.4,
+      "score_acc@5": 11.8
+     },
+     "21": {
+      "acc@1": 19.0,
+      "acc@5": 29.8,
+      "score_acc@5": 11.2
+     }
+    }
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 70.06,
+    "avg_ms": 113.39,
+    "p95_ms": 124.85
+   },
+   "abstain_auroc": 0.7053
+  },
+  "kv_pruned": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 77.28,
+    "avg_ms": 52.84,
+    "p95_ms": 58.61,
+    "acc": 64.0,
+    "ece": 0.1328,
+    "retrieval": {
+     "3": {
+      "acc@1": 23.5,
+      "acc@5": 26.1,
+      "score_acc@5": 26.1
+     },
+     "6": {
+      "acc@1": 23.7,
+      "acc@5": 26.6,
+      "score_acc@5": 9.5
+     },
+     "9": {
+      "acc@1": 23.0,
+      "acc@5": 26.1,
+      "score_acc@5": 8.7
+     },
+     "12": {
+      "acc@1": 23.7,
+      "acc@5": 26.1,
+      "score_acc@5": 6.4
+     },
+     "15": {
+      "acc@1": 23.3,
+      "acc@5": 26.1,
+      "score_acc@5": 7.1
+     },
+     "18": {
+      "acc@1": 23.5,
+      "acc@5": 26.3,
+      "score_acc@5": 9.5
+     },
+     "21": {
+      "acc@1": 23.7,
+      "acc@5": 26.1,
+      "score_acc@5": 10.0
+     }
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 79.98,
+    "avg_ms": 52.46,
+    "p95_ms": 55.28,
+    "acc": 58.4,
+    "ece": 0.222,
+    "retrieval": {
+     "3": {
+      "acc@1": 12.0,
+      "acc@5": 17.4,
+      "score_acc@5": 17.4
+     },
+     "6": {
+      "acc@1": 12.2,
+      "acc@5": 17.8,
+      "score_acc@5": 7.8
+     },
+     "9": {
+      "acc@1": 12.8,
+      "acc@5": 16.8,
+      "score_acc@5": 5.2
+     },
+     "12": {
+      "acc@1": 11.6,
+      "acc@5": 17.4,
+      "score_acc@5": 4.4
+     },
+     "15": {
+      "acc@1": 12.6,
+      "acc@5": 17.4,
+      "score_acc@5": 3.4
+     },
+     "18": {
+      "acc@1": 12.6,
+      "acc@5": 17.6,
+      "score_acc@5": 6.8
+     },
+     "21": {
+      "acc@1": 12.2,
+      "acc@5": 17.0,
+      "score_acc@5": 5.6
+     }
+    }
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 77.46,
+    "avg_ms": 51.17,
+    "p95_ms": 53.38,
+    "acc": 59.6,
+    "ece": 0.1786,
+    "retrieval": {
+     "3": {
+      "acc@1": 8.2,
+      "acc@5": 11.4,
+      "score_acc@5": 11.4
+     },
+     "6": {
+      "acc@1": 8.4,
+      "acc@5": 12.4,
+      "score_acc@5": 4.2
+     },
+     "9": {
+      "acc@1": 8.2,
+      "acc@5": 11.8,
+      "score_acc@5": 5.4
+     },
+     "12": {
+      "acc@1": 8.4,
+      "acc@5": 11.2,
+      "score_acc@5": 3.6
+     },
+     "15": {
+      "acc@1": 8.2,
+      "acc@5": 10.8,
+      "score_acc@5": 3.0
+     },
+     "18": {
+      "acc@1": 8.4,
+      "acc@5": 11.4,
+      "score_acc@5": 4.2
+     },
+     "21": {
+      "acc@1": 8.2,
+      "acc@5": 11.4,
+      "score_acc@5": 4.0
+     }
+    }
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 75.0,
+    "avg_ms": 51.23,
+    "p95_ms": 54.05
+   },
+   "abstain_auroc": 0.5398
+  }
+ }
+}

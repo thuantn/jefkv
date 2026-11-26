@@ -1,0 +1,211 @@
+{
+ "train_args": {
+  "data": "data/processed/train.json",
+  "mode": "rag",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/rag_unf6_nowarm_s2",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 0,
+  "unfreeze_top": 6,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "kg_store": "",
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 2,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 2,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "rag_dense_k1": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 87.47,
+    "avg_ms": 30.32,
+    "p95_ms": 31.19,
+    "acc": 84.9,
+    "ece": 0.0257,
+    "cf": {
+     "pair_acc": 61.2,
+     "flip_rate": 61.7,
+     "n": 1000,
+     "pair_acc_ci95": 3.02,
+     "pair_acc_label_true": 59.01,
+     "pair_acc_label_false": 63.25,
+     "gold_retrieved": 87.8
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 78.01,
+    "avg_ms": 29.87,
+    "p95_ms": 30.73,
+    "acc": 61.8,
+    "ece": 0.1701
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 82.14,
+    "avg_ms": 30.37,
+    "p95_ms": 31.3,
+    "acc": 71.2,
+    "ece": 0.1309
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 71.31,
+    "avg_ms": 30.33,
+    "p95_ms": 31.12
+   },
+   "abstain_auroc": 0.7868
+  },
+  "rag_dense_k3": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 92.97,
+    "avg_ms": 30.22,
+    "p95_ms": 31.3,
+    "acc": 87.9,
+    "ece": 0.0507,
+    "cf": {
+     "pair_acc": 67.9,
+     "flip_rate": 68.6,
+     "n": 1000,
+     "pair_acc_ci95": 2.89,
+     "pair_acc_label_true": 70.39,
+     "pair_acc_label_false": 65.57,
+     "gold_retrieved": 96.2
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 82.99,
+    "avg_ms": 29.96,
+    "p95_ms": 34.66,
+    "acc": 64.8,
+    "ece": 0.1819
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 82.5,
+    "avg_ms": 29.11,
+    "p95_ms": 30.24,
+    "acc": 70.4,
+    "ece": 0.121
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 67.07,
+    "avg_ms": 36.26,
+    "p95_ms": 40.64
+   },
+   "abstain_auroc": 0.9063
+  },
+  "rag_dense_k10": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 87.69,
+    "avg_ms": 30.68,
+    "p95_ms": 35.19,
+    "acc": 78.2,
+    "ece": 0.0992,
+    "cf": {
+     "pair_acc": 38.5,
+     "flip_rate": 40.2,
+     "n": 1000,
+     "pair_acc_ci95": 3.02,
+     "pair_acc_label_true": 40.99,
+     "pair_acc_label_false": 36.17,
+     "gold_retrieved": 98.6
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 83.24,
+    "avg_ms": 30.16,
+    "p95_ms": 37.75,
+    "acc": 66.4,
+    "ece": 0.1684
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 79.52,
+    "avg_ms": 30.36,
+    "p95_ms": 32.96,
+    "acc": 69.2,
+    "ece": 0.1032
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 67.06,
+    "avg_ms": 30.63,
+    "p95_ms": 31.59
+   },
+   "abstain_auroc": 0.8368
+  },
+  "rag_bm25_k3": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 94.65,
+    "avg_ms": 40.27,
+    "p95_ms": 45.55,
+    "acc": 91.2,
+    "ece": 0.0345,
+    "cf": {
+     "pair_acc": 76.2,
+     "flip_rate": 76.6,
+     "n": 1000,
+     "pair_acc_ci95": 2.64,
+     "pair_acc_label_true": 80.12,
+     "pair_acc_label_false": 72.53,
+     "gold_retrieved": 100.0
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 77.18,
+    "avg_ms": 48.84,
+    "p95_ms": 52.37,
+    "acc": 57.4,
+    "ece": 0.1978
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 79.18,
+    "avg_ms": 41.49,
+    "p95_ms": 45.46,
+    "acc": 66.2,
+    "ece": 0.1298
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 63.61,
+    "avg_ms": 39.12,
+    "p95_ms": 41.98
+   },
+   "abstain_auroc": 0.9547
+  }
+ }
+}

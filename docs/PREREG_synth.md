@@ -32,3 +32,23 @@ A collapsed run (OOD within 50 +- 3) is reported and left out of the means; 2 of
    reported as mixed.
 
 **Not tested here.** A RAG with a higher encoder LR (the 50x LR difference stays a confound if rule 1 fails); new data.
+
+## Outcome (27/11/2026, Modal T4, `results/synth_cap`; 9 runs, none collapsed, 1 rollback in `kv_jef_unf6_rbv_s1`)
+| OOD acc / cf pair (3 seeds) | OOD | cf | multi | alias |
+|---|---|---|---|---|
+| `kv_jef` frozen (rb_check, 6 seeds, reference) | 85.2 | 58.9 | | |
+| `kv_jef_unf6` (6 trainable layers) | 86.0 | 61.2 | 66.2 | 66.9 |
+| RAG, 2 layers, BM25 k=3 (reference) | 79.0 | 44.6 | | |
+| **RAG, 6 layers, BM25 k=3** (declared row) | **89.4** | **71.7** | 60.6 | 69.8 |
+| RAG, 6 layers, dense k=3 | 87.3 | 66.2 | 65.7 | 71.2 |
+| hybrid (rb_check, reference) | 97.2 | 94.3 | | |
+| hybrid with shuffled KV values | 96.1 | 92.8 | 63.2 | 70.6 |
+
+- **Rule 1 fails:** RAG6 is 4.2 OOD / 12.8 cf above frozen KV. The synthetic KV-over-RAG lead was trainable capacity,
+  as on FactKG.
+- **Rule 2 fails:** with the same 6 trainable encoder layers, RAG6 is 3.4 OOD / 10.5 cf above KV (KV even has 11.2M more
+  trainable parameters), so this loss is decisive.
+- **Rule 3 (b):** the shuffled hybrid is 1.5 cf below the real one (rule: >= 10), so its cf does not come from KV facts.
+  (a) pending (`synth_diag`).
+- Reported only: on `multi` (two rules combined) KV-unf6 66.2 vs RAG6 BM25 60.6 / dense 65.7.
+

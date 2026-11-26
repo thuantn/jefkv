@@ -1,0 +1,211 @@
+{
+ "train_args": {
+  "data": "data/processed/train.json",
+  "mode": "rag",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/rag_unf6_nowarm_s1",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 0,
+  "unfreeze_top": 6,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "kg_store": "",
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 1,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 1,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "rag_dense_k1": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 85.7,
+    "avg_ms": 26.36,
+    "p95_ms": 27.62,
+    "acc": 80.9,
+    "ece": 0.048,
+    "cf": {
+     "pair_acc": 53.8,
+     "flip_rate": 54.6,
+     "n": 1000,
+     "pair_acc_ci95": 3.09,
+     "pair_acc_label_true": 49.69,
+     "pair_acc_label_false": 57.64,
+     "gold_retrieved": 87.8
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 73.79,
+    "avg_ms": 26.2,
+    "p95_ms": 26.68,
+    "acc": 57.2,
+    "ece": 0.1659
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 83.6,
+    "avg_ms": 26.12,
+    "p95_ms": 27.23,
+    "acc": 68.4,
+    "ece": 0.1614
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 68.11,
+    "avg_ms": 25.7,
+    "p95_ms": 26.11
+   },
+   "abstain_auroc": 0.7958
+  },
+  "rag_dense_k3": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 91.66,
+    "avg_ms": 27.16,
+    "p95_ms": 33.36,
+    "acc": 88.0,
+    "ece": 0.0366,
+    "cf": {
+     "pair_acc": 65.9,
+     "flip_rate": 66.3,
+     "n": 1000,
+     "pair_acc_ci95": 2.94,
+     "pair_acc_label_true": 68.32,
+     "pair_acc_label_false": 63.64,
+     "gold_retrieved": 96.2
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 81.18,
+    "avg_ms": 26.0,
+    "p95_ms": 26.55,
+    "acc": 65.2,
+    "ece": 0.1598
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 84.68,
+    "avg_ms": 26.1,
+    "p95_ms": 27.14,
+    "acc": 71.6,
+    "ece": 0.142
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 64.77,
+    "avg_ms": 27.33,
+    "p95_ms": 33.34
+   },
+   "abstain_auroc": 0.9044
+  },
+  "rag_dense_k10": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 86.66,
+    "avg_ms": 27.36,
+    "p95_ms": 33.56,
+    "acc": 71.4,
+    "ece": 0.1526,
+    "cf": {
+     "pair_acc": 27.3,
+     "flip_rate": 28.8,
+     "n": 1000,
+     "pair_acc_ci95": 2.76,
+     "pair_acc_label_true": 26.29,
+     "pair_acc_label_false": 28.24,
+     "gold_retrieved": 98.6
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 81.73,
+    "avg_ms": 27.69,
+    "p95_ms": 31.72,
+    "acc": 63.6,
+    "ece": 0.1864
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 81.35,
+    "avg_ms": 26.89,
+    "p95_ms": 29.45,
+    "acc": 68.8,
+    "ece": 0.1255
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 65.86,
+    "avg_ms": 26.61,
+    "p95_ms": 28.93
+   },
+   "abstain_auroc": 0.8324
+  },
+  "rag_bm25_k3": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 91.77,
+    "avg_ms": 36.2,
+    "p95_ms": 39.98,
+    "acc": 87.7,
+    "ece": 0.0407,
+    "cf": {
+     "pair_acc": 68.9,
+     "flip_rate": 70.1,
+     "n": 1000,
+     "pair_acc_ci95": 2.87,
+     "pair_acc_label_true": 70.81,
+     "pair_acc_label_false": 67.12,
+     "gold_retrieved": 100.0
+    }
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 73.0,
+    "avg_ms": 45.11,
+    "p95_ms": 48.43,
+    "acc": 63.2,
+    "ece": 0.098
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 84.1,
+    "avg_ms": 37.58,
+    "p95_ms": 41.04,
+    "acc": 69.2,
+    "ece": 0.149
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 63.29,
+    "avg_ms": 35.39,
+    "p95_ms": 37.82
+   },
+   "abstain_auroc": 0.9243
+  }
+ }
+}
