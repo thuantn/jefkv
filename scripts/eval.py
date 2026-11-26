@@ -403,6 +403,9 @@ def main():
         retrievers = {"dense": DenseRetriever(triples, device)}
 
     results = {"train_args": targs, "variants": {}}
+    old = Path(args.out_dir or args.run or f"runs/zs_{args.zero_shot}") / "eval.json"
+    if args.variants and old.exists():  # a partial (--variants) run adds to the earlier variants instead of dropping them
+        results["variants"] = json.loads(old.read_text(encoding="utf-8"))["variants"]
     out = Path(args.out_dir or args.run or f"runs/zs_{args.zero_shot}")
     out.mkdir(parents=True, exist_ok=True)
     split_p = {}  # variant -> {claim: p_true} on ood, reused as the unedited cf pass

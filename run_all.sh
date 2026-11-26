@@ -139,7 +139,14 @@ fi
 if [ "$STAGE" = factkg_s0 ]; then  # S0 of docs/PREREG_factkg.md: eval-only diagnostics, adapters uploaded to runs/fk_s0/<name>/
   for d in runs/fk_s0/*/; do
     n=$(basename "$d"); [[ $n =~ ${ONLY:-.} ]] || continue; [ -f "$d/eval.json" ] && { echo "skip $n (done)"; continue; }
-    run_job "$n" gpu_eval --run "$d" --test data/factkg/test.json --diag
+    case $n in  # only what the decision rules need; variants whose preds already exist are skipped
+      fk_kv_jef_s*) want="kv_full kv_oracle kv_oracle_goldonly" ;;
+      fk_hybrid_s*) want="hybrid_dense_k3 hybrid_qclaim hybrid_qclaim_cfkv hybrid_qclaim_cfrag hybrid_oracle" ;;
+      *) want="" ;;
+    esac
+    re=""; for v in $want; do [ -f "$d/preds_$v.jsonl" ] || re="$re|$v"; done
+    [ -n "$re" ] || { echo "skip $n (all preds there)"; continue; }
+    run_job "$n" gpu_eval --run "$d" --test data/factkg/test.json --diag --variants "^(${re#|})\$"
   done
   wait; exit 0
 fi
