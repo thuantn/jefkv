@@ -1,0 +1,44 @@
+{
+ "train_args": {
+  "mode": "base",
+  "kv_encoder": "jef",
+  "max_slots": 16,
+  "random_kv": false,
+  "seed": 0
+ },
+ "variants": {
+  "jef_zero_shot": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 88.37,
+    "avg_ms": 25.18,
+    "p95_ms": 27.25,
+    "acc": 50.7,
+    "ece": 0.3791
+   },
+   "multi": {
+    "n_nan": 0,
+    "mean_conf": 93.9,
+    "avg_ms": 24.97,
+    "p95_ms": 26.5,
+    "acc": 48.6,
+    "ece": 0.4535
+   },
+   "alias": {
+    "n_nan": 0,
+    "mean_conf": 92.08,
+    "avg_ms": 25.39,
+    "p95_ms": 29.81,
+    "acc": 50.2,
+    "ece": 0.4222
+   },
+   "trap": {
+    "n_nan": 0,
+    "mean_conf": 88.24,
+    "avg_ms": 25.72,
+    "p95_ms": 30.68
+   },
+   "abstain_auroc": 0.5143
+  }
+ }
+}
