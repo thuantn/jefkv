@@ -121,3 +121,10 @@ Even with no cut and no routing error, frozen KV (89.1 / 51.4) stays below RAG2 
   (RAG6 without oracle) = the reader works, report `kv_full` vs RAG6 and `kv_oracle` vs RAG6-oracle, next step (hard
   negatives / a trained selector) registered separately; in between = seed 2, then the same rule, still in between =
   inconclusive, stop. Frozen gold-only cf spread over seeds was 11.5, hence 2 seeds minimum.
+
+### Outcome of T1 (27/11/2026, CPU, `results/factkg_t1`): truncation confirmed
+`kv_oracle_goldonly`, the 3 frozen adapters, memory built at 32 instead of 16 slots (eval only, the adapters were
+trained at 16): cut-gold claims (674) 82.0 / 30.7 -> **84.1 / 37.4** (+6.7 cf, rule: >= 5); full-gold claims (1,653)
+89.1 / 51.4 -> 89.1 / 51.9 (unchanged, as expected); ALL 87.1 / 45.4 -> 87.6 / 47.7, every seed up (cf +2.1 to +2.6).
+The frozen KV ceiling stays below RAG2 (ALL 91.5 / 50.8), so the FactKG verdict is unchanged. T2 trains at 32 slots.
+
