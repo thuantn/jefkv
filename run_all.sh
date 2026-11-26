@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|factkg_t2|synth_cap|synth_diag|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
@@ -14,6 +14,9 @@
 #   fresh  every trained adapter on a fresh test set (seed 7, no shared names) + no-warmup RAG runs
 #   factkg_s0  eval-only S0 diagnostics of docs/PREREG_factkg.md on uploaded adapters (runs/fk_s0/<name>/adapter.pt)
 #   factkg_t1  tail truncation, eval only: the fk_s0 KV adapters with the memory built at 32 slots (docs/PREREG_factkg.md T1)
+#   factkg_t2  KV with the top 6 encoder layers trainable and 32 slots, seeds 0-2 (docs/PREREG_factkg.md T2; one job per GPU)
+#   synth_cap  synthetic capacity checks: RAG and KV with 6 trainable layers, hybrid with shuffled KV values, 3 seeds each (docs/PREREG_synth.md)
+#   synth_diag  eval only: synthetic hybrid cf with the edit reaching only the KV or only the text (docs/PREREG_synth.md)
 #   factkg_s0b  post-hoc S0 checks: hybrid with shuffled KV values, RAG with 6 unfrozen layers (3 seeds each)
 #   factkg_seeds  FactKG seeds for the baselines (RAG, hybrid s1-2) and the published-recipe KV s0, s2 (one job at a time: Colab T4)
 #   factkg_diag  every FactKG adapter with eval.py --diag (recall, oracle retrieval ceilings, dense pre-filter; JOBS=1 for clean latency)
@@ -28,7 +31,7 @@
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|factkg_t2|synth_cap|synth_diag|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -144,6 +147,33 @@ if [ "$STAGE" = factkg_s0b ]; then  # post-hoc checks of the S0 outcome (docs/PR
   F="--data data/factkg/train.json --rollback_on_collapse 3"; export EVAL_TEST=data/factkg/test.json
   for s in 0 1 2; do train_eval fk_hybrid_randomkv_s$s --mode hybrid --random_kv --seed $s $F; done
   for s in 0 1 2; do train_eval fk_rag_unf6_s$s --mode rag --unfreeze_top 6 --seed $s $F; done
+  wait; exit 0
+fi
+
+if [ "$STAGE" = factkg_t2 ]; then  # T2 of docs/PREREG_factkg.md: does a partly trainable encoder read the KV better?
+  # KG memory kept in RAM (--kg_store cpu): 25.7k triples x 32 slots is ~8.8 GB; split the seeds with ONLY, one per GPU
+  for s in 0 1 2; do
+    n=fk_kv_jef_unf6_m32_s$s
+    [[ $n =~ ${ONLY:-.} ]] || continue; [ -f "runs/$n/eval.json" ] && { echo "skip $n (done)"; continue; }
+    run_job "$n" bash -c "{ [ -f runs/$n/adapter.pt ] || $PY scripts/train.py --mode kv --unfreeze_top 6 --max_slots 32 --kg_store cpu --seed $s --data data/factkg/train.json --rollback_on_collapse 3 --save_dir runs/$n; } && $PY scripts/eval.py --run runs/$n --test data/factkg/test.json --diag --variants '^(kv_full|kv_oracle|kv_oracle_goldonly)\$'"
+  done
+  wait; exit 0
+fi
+
+if [ "$STAGE" = synth_cap ]; then  # docs/PREREG_synth.md: is the synthetic KV-vs-RAG gap trainable capacity?
+  for s in 0 1 2; do
+    train_eval hybrid_randomkv_rbv_s$s --mode hybrid --random_kv --seed $s --rollback_on_collapse 3
+    train_eval rag_unf6_nowarm_s$s --mode rag --unfreeze_top 6 --seed $s --warmup 0 --rollback_on_collapse 3
+    train_eval kv_jef_unf6_rbv_s$s --mode kv --unfreeze_top 6 --seed $s --rollback_on_collapse 3
+  done
+  wait; exit 0
+fi
+
+if [ "$STAGE" = synth_diag ]; then  # docs/PREREG_synth.md step 0, eval only: hybrid cf with the edit on one path (adapters in runs/rb_check/)
+  for s in 0 1 2; do
+    d=runs/rb_check/hybrid_rbv_s$s; [ -f "$d/adapter.pt" ] || continue; [ -f "runs/synth_diag/hybrid_rbv_s$s/eval.json" ] && continue
+    run_job "sd_hybrid_rbv_s$s" gpu_eval --run "$d" --diag --out_dir "runs/synth_diag/hybrid_rbv_s$s" --variants '^(hybrid_qclaim|hybrid_qclaim_cfkv|hybrid_qclaim_cfrag)$'
+  done
   wait; exit 0
 fi
 

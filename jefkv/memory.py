@@ -37,9 +37,15 @@ def _encode_all(encode, texts, device, dtype, batch_size):
         s, m = encode(texts[i:i + batch_size])
         states.append(s.to(device=device, dtype=dtype))
         masks.append(m.to(device))
+    # Copy into one zero-padded tensor batch by batch (same result as pad + cat, ~1x the memory instead of 2-3x).
     S = max(s.shape[1] for s in states)
-    keys = torch.cat([F.pad(s, (0, 0, 0, S - s.shape[1])) for s in states])
-    mask = torch.cat([F.pad(m, (0, S - m.shape[1]), value=False) for m in masks])
+    keys = states[0].new_zeros(sum(s.shape[0] for s in states), S, states[0].shape[-1])
+    mask = masks[0].new_zeros(keys.shape[:2], dtype=torch.bool)
+    a = 0
+    for i, (s, m) in enumerate(zip(states, masks)):
+        keys[a:a + s.shape[0], : s.shape[1]], mask[a:a + s.shape[0], : m.shape[1]] = s, m.bool()
+        a += s.shape[0]
+        states[i] = None
     return keys, mask
 
 

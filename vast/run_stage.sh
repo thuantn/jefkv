@@ -38,7 +38,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-V search offers "gpu_name=$GPU num_gpus=1 verified=true reliability>0.98 rentable=true disk_space>=40 cuda_vers>=$CUDA inet_down>=200 cpu_cores_effective>=$CPUS cpu_ram>=16 dph_total<=$MAX_DPH" \
+V search offers "gpu_name=$GPU num_gpus=1 verified=true reliability>0.98 rentable=true disk_space>=40 cuda_vers>=$CUDA inet_down>=200 cpu_cores_effective>=$CPUS cpu_ram>=${MIN_RAM:-16} dph_total<=$MAX_DPH" \
   -o 'dph+' --raw > "$TMP/offers.json" || { echo "offer search failed"; exit 1; }
 "$PY" - "$TMP/offers.json" > "$TMP/ids" <<'EOF'
 import json, sys

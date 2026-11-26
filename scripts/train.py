@@ -37,11 +37,11 @@ def amp_dtype(device: str, amp: str) -> torch.dtype:
     return {"fp16": torch.float16, "bf16": torch.bfloat16}[amp]
 
 
-def build_memory(model: JefKVModel, triples, encoder: str, device: str, dtype, max_slots: int) -> KGMemory:
+def build_memory(model: JefKVModel, triples, encoder: str, device: str, dtype, max_slots: int, store: str = "") -> KGMemory:
     if encoder == "minilm":  # faithful AtlasKV KG2KV baseline
         return KGMemory(triples, minilm_encoder(device), device, dtype, atlaskv_kv=True)
     enc = lambda texts, max_len=max_slots: model.encode_kg_texts(texts, max_len)
-    return KGMemory(triples, enc, device, dtype)
+    return KGMemory(triples, enc, store or device, dtype)  # store: where the memory lives (cpu: only batches go to the GPU)
 
 
 def rag_contexts(retriever, samples, k):
@@ -133,6 +133,7 @@ def main():
     p.add_argument("--aux_weight", type=float, default=0.5)
     p.add_argument("--rag_k", type=int, default=3)
     p.add_argument("--max_slots", type=int, default=16)
+    p.add_argument("--kg_store", default="", help="cpu = keep the training KG memory in RAM, move each batch's subset to the GPU")
     p.add_argument("--init_kg_size", type=int, default=4)  # AtlasKV App A.1: 4, +4 / 100 steps, max 120
     p.add_argument("--kg_step_inc", type=int, default=4)
     p.add_argument("--max_kg_size", type=int, default=120)
@@ -191,7 +192,7 @@ def train_once(args) -> bool:
 
     memory = None
     if use_kv:
-        memory = build_memory(model, triples, args.kv_encoder, device, dt if device == "cuda" else torch.float32, args.max_slots)
+        memory = build_memory(model, triples, args.kv_encoder, device, dt if device == "cuda" else torch.float32, args.max_slots, args.kg_store)
         if args.random_kv:
             memory.shuffle_values(args.seed)
     retriever = DenseRetriever(triples, device) if args.mode in ("rag", "hybrid") else None
@@ -277,10 +278,11 @@ def train_once(args) -> bool:
             if memory is not None:
                 # Curriculum size = number of distractors (always added on top of the batch's gold
                 # triples, so retrieval is never trivial even when a batch has many gold rules).
-                if args.unfreeze_top and args.kv_encoder == "jef" and step % 100 == 1 and step > 1:
+                if args.unfreeze_top and args.kv_encoder == "jef" and step % 100 == 1 and (step > 1 or n_rollbacks):  # after a rollback to 0 too
                     # Trainable top layers change the states the KG keys are made of: re-encode so the
                     # keys seen in training match the ones eval builds from the trained weights.
-                    memory = build_memory(model, triples, args.kv_encoder, device, dt if device == "cuda" else torch.float32, args.max_slots)
+                    memory = kg = None  # free the old KG first: two full memories at once OOM on FactKG
+                    memory = build_memory(model, triples, args.kv_encoder, device, dt if device == "cuda" else torch.float32, args.max_slots, args.kg_store)
                     if args.random_kv:
                         memory.shuffle_values(args.seed)
                 size = min(args.max_kg_size, args.init_kg_size + (step // 100) * args.kg_step_inc)
@@ -288,7 +290,7 @@ def train_once(args) -> bool:
                 pool = [i for i in range(len(memory)) if i not in gold]
                 sub_ids = list(gold) + rng.sample(pool, min(size, len(pool)))
                 rng.shuffle(sub_ids)
-                kg = memory.subset(torch.tensor(sub_ids, device=device))
+                kg = tuple(x.to(device) for x in memory.subset(torch.tensor(sub_ids, device=memory.device)))
             ctx = rag_contexts(retriever, batch, args.rag_k) if retriever else None
             packed = model.batch(batch, ctx)
             labels = torch.tensor([s["label"] for s in batch], device=device)
@@ -345,7 +347,7 @@ def train_once(args) -> bool:
                 log.flush()
             if probe_batch is not None and (step % args.probe_every == 0 or step == 1):
                 pk, pl, pids = probe_batch
-                pr = probe(model, pk, pl, memory.subset(pids), device, dt)
+                pr = probe(model, pk, pl, tuple(x.to(device) for x in memory.subset(pids.to(memory.device))), device, dt)
                 log.write(json.dumps({"step": step, "probe": pr}) + "\n")
                 log.flush()
                 # collapsed on the probe batch (margin ~0, [DEC] case-independent) for stop_on_collapse probes in a row

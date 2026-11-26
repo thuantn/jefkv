@@ -82,6 +82,8 @@ def kv_input(s, variant, memory, retrievers, edit=None, gold=None):
     """(kg tensors, candidate ids or None) for the KV variants; prefilter = RAG's dense retriever picks the candidates;
     gold = the KV holds only the pass's gold triples (reader ceiling without distractors)."""
     if variant.get("kv") == "gold":
+        if not gold:  # gold-less splits (trap): an empty KV = no KG read
+            return None, None
         cand = torch.tensor(gold, device=memory.keys.device)
         return memory.subset(cand), cand
     if variant.get("kv") == "full":

@@ -111,7 +111,13 @@ Even with no cut and no routing error, frozen KV (89.1 / 51.4) stays below RAG2 
   `kv_oracle_goldonly`. Rules (3-seed means, split cut / full as above): truncation is **confirmed** if
   `kv_oracle_goldonly` on the cut claims gains >= 5 cf; T1 is **not** a test of KV vs RAG (frozen KV is already below
   RAG2 at its ceiling, see above), so the FactKG verdict stays negative whatever T1 shows.
-- **T2 (only if T1 confirms):** `kv_jef --unfreeze_top 6 --max_slots 32`, 1 seed, vs RAG6 (same trainable encoder layers;
-  KV also has its 11.2M adapter, so a KV win would still be confounded, a loss is decisive). KV continues only if its
-  `kv_oracle_goldonly` cf on ALL >= 60 (RAG6 60.7, seed spread of frozen gold-only cf was 11.5); < 55 = stop; 55-60 =
-  2 more seeds before deciding.
+- **T2 (revised before launch, same day, after two reviews; no longer conditional on T1: it asks a different question,
+  whether a partly trainable encoder reads the KV):** `fk_kv_jef_unf6_m32_s{0,1}` = `--mode kv --unfreeze_top 6
+  --max_slots 32 --kg_store cpu --rollback_on_collapse 3`, evaluated with `kv_full`, `kv_oracle`, `kv_oracle_goldonly`.
+  Comparators: RAG6 (`fk_rag_unf6`, 3 seeds: 96.0 / 60.7) and, as the fair partner of the oracle rows, RAG6 with the gold
+  triples first in its retrieved text (`rag_dense_k3_oracle`, eval only on the existing adapters). Same trainable encoder
+  layers; KV also has its 11.2M heads, so a KV win is still not fully matched, a loss is. Rules on the mean cf of
+  `kv_oracle_goldonly` over the seeds run: < 55 = stop (the reader is not fixed by training encoder layers); >= 60.7
+  (RAG6 without oracle) = the reader works, report `kv_full` vs RAG6 and `kv_oracle` vs RAG6-oracle, next step (hard
+  negatives / a trained selector) registered separately; in between = seed 2, then the same rule, still in between =
+  inconclusive, stop. Frozen gold-only cf spread over seeds was 11.5, hence 2 seeds minimum.
