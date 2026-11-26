@@ -11,6 +11,7 @@ Modes
 """
 
 import argparse
+import io
 import json
 import math
 import random
@@ -141,12 +142,23 @@ def main():
                    help="every N steps log probe() on a fixed batch of 32 training cases (0 = off)")
     p.add_argument("--ckpt_at", type=int, nargs="*", default=[],
                    help="also save adapter + optimizer + data-order RNG at these steps (ckpt_<step>.pt)")
+    p.add_argument("--stop_at", type=int, default=0, help="stop after this step (LR schedule still over --steps); no adapter.pt")
+    p.add_argument("--resume", default="", help="ckpt_<step>.pt to continue from (adapter, optimizer, data-order RNG)")
+    p.add_argument("--reseed", type=int, default=None, help="with --resume: new data-order seed from the resumed step")
+    p.add_argument("--perturb", type=float, default=0.0, help="with --resume: relative Gaussian noise on the adapter (chaos control)")
+    p.add_argument("--stop_on_collapse", type=int, default=0, help="stop after N probes in a row show a collapse (needs --probe_every)")
+    p.add_argument("--step_log", action="store_true", help="log batch make-up, grad / update norms per group and the scale every step")
+    p.add_argument("--rollback_on_collapse", type=int, default=0,
+                   help="max rollbacks: on a collapse (4 probes in a row), go back to an in-RAM snapshot >=150 steps earlier, "
+                        "add relative noise 1e-4 to the adapter and continue with the same batches (kv / hybrid; sets --probe_every 25)")
     p.add_argument("--collapse_check", type=int, default=1500)
     p.add_argument("--collapse_margin", type=float, default=0.1,
                    help="collapsed if the EMA of |logit margin| on rule-present training cases is below this")
     args = p.parse_args()
     if args.unfreeze_top < 0:
         args.unfreeze_top = 2 if args.mode == "rag" else 0
+    if args.rollback_on_collapse and not args.probe_every:
+        args.probe_every = 25
     args.seed_requested, args.restarts, args.collapsed_at_check = args.seed, 0, None
     while not train_once(args):
         # Frozen-Jef runs sometimes fall into an "always 50/50" solution early and never leave it (README,
@@ -203,12 +215,53 @@ def train_once(args) -> bool:
         probe_batch = (model.batch(ps, rag_contexts(retriever, ps, args.rag_k) if retriever else None),
                        torch.tensor([s["label"] for s in ps], device=device), torch.tensor(pids, device=device))
 
+    def snapshot(step):  # everything a resume needs (checkpoints and in-RAM rollback snapshots)
+        return {"args": vars(args), "step": step, "state": model.trainable_state(), "opt": opt.state_dict(),
+                "scaler": scaler.state_dict(), "rng": rng.getstate(), "ema": ema, "ema_margin": ema_margin}
+
+    def restore(ck):
+        model.load_trainable(ck["state"])
+        base = [g["base_lr"] for g in opt.param_groups]
+        opt.load_state_dict(ck["opt"])
+        for g, b in zip(opt.param_groups, base):  # --lr / --enc_lr of this call, not the checkpoint's
+            g["base_lr"] = b
+        scaler.load_state_dict(ck["scaler"])
+        rng.setstate(ck["rng"])
+        return ck["step"], ck.get("ema"), ck.get("ema_margin")
+
+    def perturb(rel, seed):  # relative Gaussian noise on every trainable weight
+        gen = torch.Generator().manual_seed(seed)
+        with torch.no_grad():
+            for p in new_params + enc_params:
+                p.mul_(1 + rel * torch.randn(p.shape, generator=gen).to(p.device))
+
+    step, ema, ema_margin = 0, None, None
+    if args.resume:  # rescue tests: continue a run from a checkpoint, optionally with one factor changed
+        step, ema, ema_margin = restore(torch.load(args.resume, map_location=device, weights_only=False))
+        if args.reseed is not None:
+            rng = random.Random(args.reseed)
+        if args.perturb:
+            perturb(args.perturb, 0)
+
+    named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+    def pgroup(n):  # parameter groups for --step_log (read-only diagnostics)
+        for key, g in (("kg_v_proj", "v"), ("kg_q_proj", "qk"), ("kg_k_proj", "qk"), ("kg_gate", "gate"), ("kg_prior", "prior"), ("temp.", "temp")):
+            if key in n:
+                return g
+        return "other"
     save = Path(args.save_dir)
     save.mkdir(parents=True, exist_ok=True)
     model.train()
-    ema, ema_margin, t0 = None, None, time.time()
+    t0, n_bad, n_rb_bad, n_rollbacks, snaps = time.time(), 0, 0, 0, {}
+    bar = tqdm(total=args.steps, initial=step, desc=save.name)
     with (save / "train_log.jsonl").open("a" if args.restarts else "w", encoding="utf-8") as log:  # restarts append
-        for step in tqdm(range(1, args.steps + 1), desc=save.name):
+        while step < args.steps:
+            if args.rollback_on_collapse and (step % 100 == 0 or not snaps):  # in RAM (CPU), the last 3 only
+                buf = io.BytesIO()
+                torch.save(snapshot(step), buf)
+                snaps = {s: b for s, b in snaps.items() if s > step - 300} | {step: buf}
+            step += 1
+            bar.update(1)
             frac = 0.5 * (1 + math.cos(math.pi * (step - 1) / max(1, args.steps - 1)))
             # Linear warmup: damps Adam's first steps (each moves all 11M adapter weights by ~lr). It changed which
             # seeds collapse to 50/50 but did not stop collapses (README, "Training collapse").
@@ -253,9 +306,24 @@ def train_once(args) -> bool:
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
+            if args.step_log:  # measured only: nothing below changes the update
+                sl, before = {"present": int(present.sum()), "label1": int(labels.sum()), "scale": scaler.get_scale()}, {}
+                for n, p in named:
+                    g = pgroup(n)
+                    if p.grad is not None:
+                        sl["g_" + g] = sl.get("g_" + g, 0.0) + p.grad.float().pow(2).sum().item()
+                    before[n] = p.detach().clone()
             torch.nn.utils.clip_grad_norm_([p for g in groups for p in g["params"]], 1.0)
             scaler.step(opt)
             scaler.update()
+            if args.step_log:
+                for n, p in named:
+                    g = pgroup(n)
+                    sl["u_" + g] = sl.get("u_" + g, 0.0) + (p.detach() - before[n]).float().pow(2).sum().item()
+                    sl["w_" + g] = sl.get("w_" + g, 0.0) + before[n].float().pow(2).sum().item()
+                sl = {k: (v ** 0.5 if k[:2] in ("g_", "u_", "w_") else v) for k, v in sl.items()}
+                sl["skipped"] = scaler.get_scale() < sl["scale"]
+                log.write(json.dumps({"step": step, "loss_step": loss.item(), "dec_step": dec.item(), "sl": sl}) + "\n")
 
             ema = loss.item() if ema is None else 0.95 * ema + 0.05 * loss.item()
             if present.any():
@@ -274,11 +342,34 @@ def train_once(args) -> bool:
                 log.flush()
             if probe_batch is not None and (step % args.probe_every == 0 or step == 1):
                 pk, pl, pids = probe_batch
-                log.write(json.dumps({"step": step, "probe": probe(model, pk, pl, memory.subset(pids), device, dt)}) + "\n")
+                pr = probe(model, pk, pl, memory.subset(pids), device, dt)
+                log.write(json.dumps({"step": step, "probe": pr}) + "\n")
                 log.flush()
+                # collapsed on the probe batch (margin ~0, [DEC] case-independent) for stop_on_collapse probes in a row
+                n_bad = n_bad + 1 if pr["margin_kg"] < 0.1 and pr["cos_dec_l21"] > 0.99 else 0
+                if args.stop_on_collapse and n_bad >= args.stop_on_collapse:
+                    return True
+                # Rollback criterion: the one above missed a collapse whose [DEC] cosine stayed 0.93-0.99 (randomkv s2),
+                # and margin alone misfires early (healthy runs dip to 0.05 before step ~300). On every probe log so far
+                # (5 collapses, 20 runs without one) this one flags each collapse 75-100 steps after onset and nothing else.
+                n_rb_bad = n_rb_bad + 1 if pr["margin_kg"] < 0.1 and (pr["cos_dec_l21"] > 0.99 or pr["margin_kg"] < 0.01) else 0
+                if args.rollback_on_collapse and n_rb_bad >= 4 and n_rollbacks < args.rollback_on_collapse:
+                    # Collapses are knife-edge events (README, "Training collapse"): a 1e-4 nudge avoided 3/3 from just
+                    # before onset, with the same batches. Go back >=150 steps (onset is up to ~100 steps before detection).
+                    to = max((s for s in snaps if s <= step - 150), default=min(snaps))
+                    n_rollbacks += 1
+                    log.write(json.dumps({"step": step, "rollback_to": to, "rollback": n_rollbacks}) + "\n")
+                    step, ema, ema_margin = restore(torch.load(io.BytesIO(snaps[to].getvalue()), map_location=device, weights_only=False))
+                    snaps = {s: b for s, b in snaps.items() if s <= to}
+                    perturb(1e-4, n_rollbacks)
+                    n_bad = n_rb_bad = 0
+                    bar.n = step
+                    bar.refresh()
+                    continue
             if step in args.ckpt_at:
-                torch.save({"args": vars(args), "step": step, "state": model.trainable_state(), "opt": opt.state_dict(),
-                            "scaler": scaler.state_dict(), "rng": rng.getstate()}, save / f"ckpt_{step}.pt")
+                torch.save(snapshot(step), save / f"ckpt_{step}.pt")
+            if step == args.stop_at:
+                return True
 
     torch.save({"args": vars(args), "state": model.trainable_state()}, save / "adapter.pt")
     print(f"saved {save / 'adapter.pt'} after {time.time() - t0:.0f}s")
