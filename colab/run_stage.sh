@@ -2,6 +2,8 @@
 # Run one run_all.sh stage on a free Colab T4 with the Colab CLI (Linux/macOS/WSL only), then fetch the results.
 #   uv tool install google-colab-cli      # once; first `colab` call asks for a Google login
 #   bash colab/run_stage.sh smoke|gate|seeds|full [session-name]
+# Env: EXTRA_TAR="data/factkg" (more repo paths in the code tarball, e.g. data that is not in git),
+#      KEEP_ADAPTERS=1 (also download adapter.pt: needed to re-evaluate later).
 # Steps: new T4 session -> upload a code tarball -> pip install -> nohup the stage -> poll every 2 min
 # (polling also keeps the runtime busy) -> download runs/ (adapters excluded) to runs_colab/<stage>/ -> stop.
 # On WSL without a keyring service, install with `--with keyrings.alt` and
@@ -12,7 +14,7 @@ cd "$(dirname "$0")/.."
 OUT=runs_colab/$STAGE; mkdir -p "$OUT"
 TMP=$(mktemp -d); TGZ=$TMP/code.tgz
 trap 'rm -rf "$TMP"' EXIT
-tar --exclude=__pycache__ -czf "$TGZ" jefkv scripts tests run_all.sh requirements.txt data/generate_benchmark.py
+tar --exclude=__pycache__ -czf "$TGZ" jefkv scripts tests run_all.sh requirements.txt data/generate_benchmark.py ${EXTRA_TAR:-}
 # One %%bash cell in /content/jefkv. A failing cell prints a traceback that repeats the cell source,
 # so status markers are built from two strings ("ST""ATE=") and never match the source text itself.
 cell() { printf '%%%%bash\ncd /content/jefkv 2>/dev/null || true\n%s\n' "$1" | timeout 600 colab exec -s "$S" 2>&1; }
@@ -24,8 +26,9 @@ cell "export PYTHONPATH=.; nohup bash run_all.sh $STAGE > /content/stage.log 2>&
 
 # Free runtimes can be reclaimed at any time (seen 25/11/2026: 4 finished runs lost), so fetch the results
 # after every finished run, not only at the end.
+EXA="--exclude=adapter.pt"; [ "${KEEP_ADAPTERS:-}" = 1 ] && EXA=
 fetch() {
-  cell 'tar -czf /content/runs_out.tgz --exclude=adapter.pt runs* outputs* /content/stage.log 2>/dev/null; ls -la /content/runs_out.tgz' >/dev/null
+  cell "tar -czf /content/runs_out.tgz $EXA --exclude='ckpt_*.pt' runs* outputs* /content/stage.log 2>/dev/null; ls -la /content/runs_out.tgz" >/dev/null
   colab download -s "$S" /content/runs_out.tgz "$OUT/runs_out.tgz" 2>&1 | tail -1 && tar -xzf "$OUT/runs_out.tgz" -C "$OUT"
 }
 fails=0; got=0
