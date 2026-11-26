@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
@@ -12,6 +12,7 @@
 #   seeds_lr  seeds 3-5 of kv_jef / randomkv / hybrid with LR 3e-4 (6 seeds per config with screen_lr + confirm_lr)
 #   screen_lr / screen_fkv  collapse fixes, one factor each: adapter lr 3e-4 | --freeze_kg_v (kv s0-2, randomkv s2, hybrid s1)
 #   fresh  every trained adapter on a fresh test set (seed 7, no shared names) + no-warmup RAG runs
+#   factkg_scale  every FactKG adapter re-evaluated with the same claims and a 4.9k / 20k / 50k-triple KG (eval only)
 #   factkg_more  FactKG seeds 1-2 of kv / randomkv, plus the paper's MiniLM KG2KV (kv_minilm) with its RandomKV control
 #   factkg  pilot on real claims: FactKG one-hop (data/factkg from scripts/factkg_convert.py, never committed), seed 0
 #   smoke  tiny CPU check that every code path runs (minutes)
@@ -22,7 +23,7 @@
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -129,6 +130,17 @@ if [ "$STAGE" = factkg ]; then  # real claims, frozen Jef: is KV still causal (c
   train_eval fk_kv_jef_s0 --mode kv $F
   train_eval fk_kv_jef_randomkv_s0 --mode kv --random_kv $F
   [ -f runs/fk_zs_base/eval.json ] || run_job fk_zs_base gpu_eval --zero_shot base --test $EVAL_TEST --out_dir runs/fk_zs_base
+  exit 0
+fi
+
+if [ "$STAGE" = factkg_scale ]; then  # does accuracy / cf hold when the KG grows? (test_kg*.json: factkg_convert.py --grow)
+  for r in runs/fk_*_s[0-9]; do
+    n=$(basename "$r"); [ -f "$r/adapter.pt" ] || continue
+    for kg in kg5k kg20k kg50k; do
+      t=data/factkg/test_$kg.json; [ $kg = kg5k ] && t=data/factkg/test.json
+      [ -f "runs/fk_scale/${n}_$kg/eval.json" ] || run_job "fks_${n}_$kg" gpu_eval --run "$r" --test $t --out_dir "runs/fk_scale/${n}_$kg"
+    done
+  done
   exit 0
 fi
 

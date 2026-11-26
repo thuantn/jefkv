@@ -128,6 +128,8 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
         return None
     model.eval()
     both = flips = n = 0
+    by_label = {0: [], 1: []}  # pair correct, per original label (True claims vs False claims)
+    hits = []  # RAG: was the gold triple among the retrieved ones (else the edit cannot reach the model)
     for s in tqdm(samples, desc=variant["name"] + "/cf", leave=False):
         nums = re.findall(r"\d+", s["state"])
         if not s["gold_idx"] or not (nums or "cf_tail" in s):
@@ -144,7 +146,10 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
             ctx, kg, undo = None, None, None
             if variant.get("retriever"):
                 r = retrievers[variant["retriever"]]
-                ctx = [" ".join(triple_text(t if i == gi else r.triples[i]) for i in r.search(s["state"], variant["k"])[0])]
+                ids = r.search(s["state"], variant["k"])[0]
+                ctx = [" ".join(triple_text(t if i == gi else r.triples[i]) for i in ids)]
+                if t is swapped:
+                    hits.append(gi in list(ids))
             if variant.get("kv") == "full":
                 undo = _set_row(memory, gi, t) if t is swapped else None
                 kg = (memory.keys, memory.vals, memory.slot_mask)
@@ -158,11 +163,18 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
             preds.append((pred, pred == label))
         n += 1
         both += preds[0][1] and preds[1][1]
+        by_label[s["label"]].append(preds[0][1] and preds[1][1])
         flips += preds[0][0] != preds[1][0]
     if not n:
         return None
-    return {"pair_acc": round(100 * both / n, 2), "flip_rate": round(100 * flips / n, 2), "n": n,
-            "pair_acc_ci95": round(196 * float(np.sqrt(max(both / n * (1 - both / n), 1e-12) / n)), 2)}
+    out = {"pair_acc": round(100 * both / n, 2), "flip_rate": round(100 * flips / n, 2), "n": n,
+           "pair_acc_ci95": round(196 * float(np.sqrt(max(both / n * (1 - both / n), 1e-12) / n)), 2)}
+    for lab, name in ((1, "pair_acc_label_true"), (0, "pair_acc_label_false")):
+        if by_label[lab]:
+            out[name] = round(100 * float(np.mean(by_label[lab])), 2)
+    if hits:
+        out["gold_retrieved"] = round(100 * float(np.mean(hits)), 2)
+    return out
 
 
 def variants_for(mode):
