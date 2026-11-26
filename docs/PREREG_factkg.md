@@ -177,7 +177,19 @@ Caveat stated in advance: with 19 of 22 layers trainable JefKV is close to a ful
 | RAG, 6 trainable layers | 96.9 / 61.8 | | 98.1 / 81.2 | 0.000 |
 | RAG, 19 trainable layers | 98.2 / 65.3 | | 98.2 / 79.1 | 0.000 |
 G_T2 = 56.9. Steps effect +8.9 cf, depth effect +0.5. Thresholds: under-trained >= 66.9, not under-trained < 61.9.
-Both runs are in between and within 3 of 66.9, so the rule asks for seed 1 before it is read (running, same box type).
+Both runs are in between and within 3 of 66.9, so the rule asked for seed 1 before it was read.
 **KV competitive: no** for either run, seed 0: R = 81.2 (6 layers) / 79.1 (19 layers), so G must be >= 76.2 / 74.1;
 G is 10.4 / 7.8 short, not within 3 of the threshold. With natural routing the gap is ~40 cf (23.6 vs 61.8).
 With 9,000 steps both readers fit the training set (KV loss 0.01, RAG ~0), so the gap at the oracle is not a loss gap.
+
+### Outcome of T3 (27/11/2026, seeds 0-1, KV on RTX 3090s; no rollback fired)
+| G (`kv_oracle_goldonly` cf) | seed 0 | seed 1 | mean | `kv_full` mean | `kv_oracle` cf mean |
+|---|---|---|---|---|---|
+| KV, 6 layers, 9k | 65.8 | 68.3 | **67.1** | 82.0 / 24.0 | 56.0 |
+| KV, 19 layers, 9k | 66.3 | 67.9 | **67.1** | 83.9 / 24.6 | 56.1 |
+Steps effect +10.2 cf (67.1 vs G_T2 56.9), depth effect 0.0. **Under-trained: yes, at the margin** (67.1 vs the 66.9
+threshold; seed-0 G alone was below it). **KV competitive: no** (67.1 vs 76.2 / 74.1 needed; RAG seed 0 only, R used
+its 79.1 floor for the 19-layer run). Registered reading: *more training helps KV but it still loses to RAG at the same
+budget*, by 12-14 cf with the right facts only and ~40 cf with natural routing. Training all 19 layers adds nothing over
+6 at 9,000 steps. Next steps here would need new ideas (selector, hard negatives), not more steps: the KV line on FactKG
+stops at this verdict.
