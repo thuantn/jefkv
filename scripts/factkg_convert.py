@@ -59,7 +59,8 @@ def build(claims, kg, rng, neighbours, rel_tails):
     triples, index, samples = [], {}, []
 
     def add(h, r, t):
-        k = (h, r, t)
+        k = (name(h).lower(), rel_text(r), name(t).lower())  # text, not raw key: two raw keys with one name gave two
+        # identical gold rows, and cf edits only gold[0] (79/2,327 test claims, review 26/11/2026)
         if k not in index:
             index[k] = len(triples)
             triples.append({"head": name(h), "relation": rel_text(r), "tail": name(t)})
@@ -71,7 +72,7 @@ def build(claims, kg, rng, neighbours, rel_tails):
         if not tails or label != (t in tails) or (not label and name(t).lower() in tn):  # undecidable or contradicted: drop
             continue
         first = t if label else tails[0]
-        gold = [add(h, r, first)] + [add(h, r, x) for x in tails if x != first][:7]  # ponytail: 8 gold max per claim
+        gold = list(dict.fromkeys([add(h, r, first)] + [add(h, r, x) for x in tails if x != first][:7]))  # ponytail: 8 gold max
         for e in (h, t):  # same-entity distractors
             nb = [(e, rr, x) for rr, xs in kg.get(e, {}).items() if not rr.startswith("~") and rr != r for x in xs]
             for k in rng.sample(nb, min(neighbours, len(nb))):
