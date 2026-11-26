@@ -128,3 +128,29 @@ trained at 16): cut-gold claims (674) 82.0 / 30.7 -> **84.1 / 37.4** (+6.7 cf, r
 89.1 / 51.4 -> 89.1 / 51.9 (unchanged, as expected); ALL 87.1 / 45.4 -> 87.6 / 47.7, every seed up (cf +2.1 to +2.6).
 The frozen KV ceiling stays below RAG2 (ALL 91.5 / 50.8), so the FactKG verdict is unchanged. T2 trains at 32 slots.
 
+## T3: is the KV reader under-trained? (registered 27/11/2026, before running)
+Why: at the end of T2 the KV training loss was still falling (FactKG dec_loss 0.148 -> 0.137 over the last 1,000
+steps; synthetic `kv_jef_unf6` 0.327 -> 0.285) while RAG6 had converged (0.023 -> 0.030), and `--unfreeze_top 6`
+trains only 2 of the 7 KV layers (18, 21): layers 3-15 write the KG read-out into frozen layers. RAG only re-uses
+reading skills the encoder already has; KV has to learn a new input channel, so 3,000 steps x batch 10 may be too few.
+Revised before launch (same day) after two reviews: the first draft changed steps and trainable depth at once, and its
+loss gate could not pass (RAG's loss goes to ~0). The two factors are now separate.
+Runs (seed 0, `run_all.sh factkg_t3`; every KV run `--max_slots 32 --kg_store cpu --rollback_on_collapse 3`, eval
+`kv_full`, `kv_oracle`, `kv_oracle_goldonly`; RAG runs eval `rag_dense_k3`, `rag_dense_k3_oracle`; RAG never collapsed
+and has no probe, so no rollback):
+- `fk_kv_jef_unf6_m32_9k_s0` = T2 with `--steps 9000` (**steps** only).
+- `fk_kv_jef_unf19_m32_9k_s0` = layers 3-21 trainable (every KV layer), 9000 steps (**steps + depth**).
+- `fk_rag_unf6_9k_s0`, `fk_rag_unf19_9k_s0`: RAG at the same two budgets.
+G = cf pair of `kv_oracle_goldonly`; G_T2 = T2 mean over its seeds (filled in before T3 is read); R = max(cf of the
+matched RAG's `rag_dense_k3_oracle`, 79.1 = RAG6-oracle seed 0), so a RAG that gets worse with more training does not
+lower the bar.
+- Steps effect = G(unf6 9k) - G_T2; depth effect = G(unf19 9k) - G(unf6 9k). Reported with the dec_loss curves.
+- **Under-trained** if max G >= G_T2 + 10; **not under-trained** if both G < G_T2 + 5 (stop the KV line on FactKG);
+  in between = weak evidence, reported.
+- **KV competitive** if G >= R - 5 for a run (its matched RAG). Under-trained but not competitive = "more training
+  helps KV but it still loses to RAG at the same budget".
+- A single seed is noisy (frozen gold-only cf spread 11.5): a run whose G falls within 3 of a threshold gets seed 1
+  (budget permitting) before the rule is read; otherwise the seed-0 reading is reported as one seed.
+Not controlled: one LR pair for all budgets (heads 1e-3, encoder 2e-5, one grad-norm clip), warmup 200, the KG keys
+re-encoded every 100 steps (a moving target for KV), layer 3 still routes with identity Q/K.
+Caveat stated in advance: with 19 of 22 layers trainable JefKV is close to a full fine-tune, not a plug-in memory.

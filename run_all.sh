@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|factkg_t2|synth_cap|synth_diag|screen_lr|screen_fkv|unf|rag|full
+# Usage: bash run_all.sh smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|factkg_t2|factkg_t3|synth_cap|synth_diag|screen_lr|screen_fkv|unf|rag|full
 #   warm   re-run the seeds that collapsed in full v1, with --warmup 200 (+ one no-warmup control)
 #   seeds  seeds 3-5 of kv_jef / randomkv / hybrid (stability check, run on Colab)
 #   restart the 2 runs that collapsed with warmup, re-trained with --restart_on_collapse 2
@@ -15,6 +15,7 @@
 #   factkg_s0  eval-only S0 diagnostics of docs/PREREG_factkg.md on uploaded adapters (runs/fk_s0/<name>/adapter.pt)
 #   factkg_t1  tail truncation, eval only: the fk_s0 KV adapters with the memory built at 32 slots (docs/PREREG_factkg.md T1)
 #   factkg_t2  KV with the top 6 encoder layers trainable and 32 slots, seeds 0-2 (docs/PREREG_factkg.md T2; one job per GPU)
+#   factkg_t3  KV and RAG with layers 3-21 trainable and 9000 steps, seed 0 (docs/PREREG_factkg.md T3)
 #   synth_cap  synthetic capacity checks: RAG and KV with 6 trainable layers, hybrid with shuffled KV values, 3 seeds each (docs/PREREG_synth.md)
 #   synth_diag  eval only: synthetic hybrid cf with the edit reaching only the KV or only the text (docs/PREREG_synth.md)
 #   factkg_s0b  post-hoc S0 checks: hybrid with shuffled KV values, RAG with 6 unfrozen layers (3 seeds each)
@@ -31,7 +32,7 @@
 #   full   every config x 3 seeds + zero-shot Jef baselines, then results table + plots
 set -euo pipefail
 STAGE=${1:-gate}
-case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|factkg_t2|synth_cap|synth_diag|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case $STAGE in smoke|gate|warm|seeds|restart|probe|rescue|pairs|rollback|rb_check|bench|confirm_lr|seeds_lr|fresh|factkg|factkg_more|factkg_scale|factkg_diag|factkg_seeds|factkg_s0|factkg_s0b|factkg_t1|factkg_t2|factkg_t3|synth_cap|synth_diag|screen_lr|screen_fkv|unf|rag|full) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 export PYTHONPATH=.
 PY=${PY:-python}
 
@@ -156,6 +157,18 @@ if [ "$STAGE" = factkg_t2 ]; then  # T2 of docs/PREREG_factkg.md: does a partly 
     n=fk_kv_jef_unf6_m32_s$s
     [[ $n =~ ${ONLY:-.} ]] || continue; [ -f "runs/$n/eval.json" ] && { echo "skip $n (done)"; continue; }
     run_job "$n" bash -c "{ [ -f runs/$n/adapter.pt ] || $PY scripts/train.py --mode kv --unfreeze_top 6 --max_slots 32 --kg_store cpu --seed $s --data data/factkg/train.json --rollback_on_collapse 3 --save_dir runs/$n; } && $PY scripts/eval.py --run runs/$n --test data/factkg/test.json --diag --variants '^(kv_full|kv_oracle|kv_oracle_goldonly)\$'"
+  done
+  wait; exit 0
+fi
+
+if [ "$STAGE" = factkg_t3 ]; then  # T3 of docs/PREREG_factkg.md: is the KV reader under-trained? one job per GPU (ONLY)
+  K="--mode kv --max_slots 32 --kg_store cpu --rollback_on_collapse 3 --steps 9000 --seed 0 --data data/factkg/train.json"
+  R="--mode rag --steps 9000 --seed 0 --data data/factkg/train.json"
+  for c in "fk_kv_jef_unf6_m32_9k_s0:$K --unfreeze_top 6:kv" "fk_kv_jef_unf19_m32_9k_s0:$K --unfreeze_top 19:kv"            "fk_rag_unf6_9k_s0:$R --unfreeze_top 6:rag" "fk_rag_unf19_9k_s0:$R --unfreeze_top 19:rag"; do
+    n=${c%%:*}; rest=${c#*:}; a=${rest%:*}; m=${rest##*:}
+    [[ $n =~ ${ONLY:-.} ]] || continue; [ -f "runs/$n/eval.json" ] && { echo "skip $n (done)"; continue; }
+    if [ "$m" = kv ]; then v='^(kv_full|kv_oracle|kv_oracle_goldonly)$'; else v='^(rag_dense_k3|rag_dense_k3_oracle)$'; fi
+    run_job "$n" bash -c "{ [ -f runs/$n/adapter.pt ] || $PY scripts/train.py $a --save_dir runs/$n; } && $PY scripts/eval.py --run runs/$n --test data/factkg/test.json --diag --variants '$v'"
   done
   wait; exit 0
 fi
