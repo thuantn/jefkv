@@ -183,9 +183,9 @@ if [ "$STAGE" = synth_cap ]; then  # docs/PREREG_synth.md: is the synthetic KV-v
 fi
 
 if [ "$STAGE" = synth_diag ]; then  # docs/PREREG_synth.md step 0, eval only: hybrid cf with the edit on one path (adapters in runs/rb_check/)
-  for s in 0 1 2; do
-    d=runs/rb_check/hybrid_rbv_s$s; [ -f "$d/adapter.pt" ] || continue; [ -f "runs/synth_diag/hybrid_rbv_s$s/eval.json" ] && continue
-    run_job "sd_hybrid_rbv_s$s" gpu_eval --run "$d" --diag --out_dir "runs/synth_diag/hybrid_rbv_s$s" --variants '^(hybrid_qclaim|hybrid_qclaim_cfkv|hybrid_qclaim_cfrag)$'
+  for d in runs/rb_check/hybrid_rbv_s*/; do  # whichever adapters were uploaded (s2 was not kept: s0, s1, s3)
+    n=$(basename "$d"); [[ $n =~ ${ONLY:-.} ]] || continue; [ -f "$d/adapter.pt" ] || continue; [ -f "runs/synth_diag/$n/eval.json" ] && continue
+    run_job "sd_$n" gpu_eval --run "$d" --diag --out_dir "runs/synth_diag/$n" --variants '^(hybrid_qclaim|hybrid_qclaim_cfkv|hybrid_qclaim_cfrag)$'
   done
   wait; exit 0
 fi

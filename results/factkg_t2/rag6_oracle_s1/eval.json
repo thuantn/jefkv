@@ -1,0 +1,63 @@
+{
+ "train_args": {
+  "data": "data/factkg/train.json",
+  "mode": "rag",
+  "kv_encoder": "jef",
+  "random_kv": false,
+  "save_dir": "runs/fk_rag_unf6_s1",
+  "steps": 3000,
+  "batch_size": 10,
+  "lr": 0.001,
+  "enc_lr": 2e-05,
+  "min_lr_ratio": 0.01,
+  "warmup": 200,
+  "unfreeze_top": 6,
+  "aux_weight": 0.5,
+  "rag_k": 3,
+  "max_slots": 16,
+  "init_kg_size": 4,
+  "kg_step_inc": 4,
+  "max_kg_size": 120,
+  "amp": "auto",
+  "seed": 1,
+  "freeze_kg_v": false,
+  "restart_on_collapse": 0,
+  "probe_every": 25,
+  "ckpt_at": [],
+  "stop_at": 0,
+  "resume": "",
+  "reseed": null,
+  "perturb": 0.0,
+  "stop_on_collapse": 0,
+  "step_log": false,
+  "rollback_on_collapse": 3,
+  "collapse_check": 1500,
+  "collapse_margin": 0.1,
+  "seed_requested": 1,
+  "restarts": 0,
+  "collapsed_at_check": false
+ },
+ "variants": {
+  "rag_dense_k3_oracle": {
+   "ood": {
+    "n_nan": 0,
+    "mean_conf": 99.3,
+    "avg_ms": 260.79,
+    "p95_ms": 336.52,
+    "acc": 97.25,
+    "ece": 0.0223,
+    "acc_label_true": 97.34,
+    "acc_label_false": 97.13,
+    "cf": {
+     "pair_acc": 80.4,
+     "flip_rate": 80.62,
+     "n": 2327,
+     "pair_acc_ci95": 1.61,
+     "pair_acc_label_true": 73.83,
+     "pair_acc_label_false": 88.44,
+     "gold_retrieved": 100.0
+    }
+   }
+  }
+ }
+}

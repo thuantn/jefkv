@@ -128,6 +128,17 @@ trained at 16): cut-gold claims (674) 82.0 / 30.7 -> **84.1 / 37.4** (+6.7 cf, r
 89.1 / 51.4 -> 89.1 / 51.9 (unchanged, as expected); ALL 87.1 / 45.4 -> 87.6 / 47.7, every seed up (cf +2.1 to +2.6).
 The frozen KV ceiling stays below RAG2 (ALL 91.5 / 50.8), so the FactKG verdict is unchanged. T2 trains at 32 slots.
 
+### T2 so far (27/11/2026, `results/factkg_t2`; RTX 3090, no rollback fired)
+| seed | `kv_full` | `kv_oracle` | `kv_oracle_goldonly` |
+|---|---|---|---|
+| 0 | 79.5 / 21.3 | 91.1 / 48.6 | 90.9 / 52.9 |
+| 1 | 79.2 / 23.0 | 92.4 / 52.9 | 92.7 / 61.1 |
+Gold-only cf mean 57.0: between 55 and 60.7, so the rule asks for seed 2. Deviation: seed 2 runs on a Modal T4 (the
+Vast credit is held for T3), fp16 as on the 3090; trajectories differ between GPUs, so it is a seed, not a replicate.
+RAG6 with the gold triples first in its text (`rag_dense_k3_oracle`, eval only, 3 seeds): 97.1 / **79.8**
+(79.1, 80.4, 80.1), i.e. the RAG reader with the right facts is ~20 cf above the 6-layer KV reader with only the right facts.
+`kv_full` is below frozen KV (79.3 vs 81.4 acc, cf 22.2 vs 28.0): training the top layers did not help natural routing.
+
 ## T3: is the KV reader under-trained? (registered 27/11/2026, before running)
 Why: at the end of T2 the KV training loss was still falling (FactKG dec_loss 0.148 -> 0.137 over the last 1,000
 steps; synthetic `kv_jef_unf6` 0.327 -> 0.285) while RAG6 had converged (0.023 -> 0.030), and `--unfreeze_top 6`

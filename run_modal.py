@@ -23,7 +23,7 @@ image = (
 )
 
 
-@app.function(image=image, gpu="T4", timeout=24 * 3600, volumes={"/root/jefkv/runs": vol})
+@app.function(image=image, gpu="T4", memory=16384, timeout=24 * 3600, volumes={"/root/jefkv/runs": vol})
 def run(stage: str = "gate", only: str = ""):
     try:  # only: ONLY regex of run_all.sh, so one stage can be spread over several GPUs
         subprocess.run(["bash", "run_all.sh", stage], cwd="/root/jefkv", check=True, env={**os.environ, "ONLY": only or "."})
