@@ -120,3 +120,22 @@ references:
         given-names: "Iryna"
     year: 2019
     url: "https://arxiv.org/abs/1908.10084"
+  - type: conference-paper
+    title: "FactKG: Fact Verification via Reasoning on Knowledge Graphs"
+    authors:
+      - family-names: "Kim"
+        given-names: "Jiho"
+      - family-names: "Park"
+        given-names: "Sungjin"
+      - family-names: "Kwon"
+        given-names: "Yeonsu"
+      - family-names: "Jo"
+        given-names: "Yohan"
+      - family-names: "Thorne"
+        given-names: "James"
+      - family-names: "Choi"
+        given-names: "Edward"
+    collection-title: "Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (ACL)"
+    year: 2023
+    doi: "10.18653/v1/2023.acl-long.895"
+    url: "https://aclanthology.org/2023.acl-long.895"
