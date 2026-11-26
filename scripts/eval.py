@@ -241,7 +241,7 @@ def _set_row(memory, gi, t):
 
 
 @torch.no_grad()
-def counterfactual(model, samples, variant, memory, retrievers, triples, device, dt):
+def counterfactual(model, samples, variant, memory, retrievers, triples, device, dt, p0=None):
     """Causal check that the model USES the gold triple: same case, gold tail changed so the label flips
     (on ood, label = case number <= tail for every relation). A case-only shortcut gets at most one of
     each pair right, so pair accuracy is ~0 for a model that ignores the knowledge; flip rate = share of
@@ -276,6 +276,9 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
         pp = []
         for t, label in ((triples[gi], s["label"]), (swapped, 1 - s["label"])):
             sw = t is swapped
+            if not sw and p0 is not None and si in p0:  # the unedited pass = the split's own prediction: reuse it
+                pp.append((int(p0[si] > 0.5), int(p0[si] > 0.5) == label, p0[si]))
+                continue
             edit = (gis, t) if (sw and real) else None
             gold = pass_gold(s, label)
             ctx, kg, cand, undo, force = None, None, None, [], None
@@ -346,8 +349,8 @@ def variants_for(mode, diag=False):
         # cf_source: the cf edit reaches only the KV path (kv) or only the text path (rag); cf_only: accuracy unchanged
         return [{"name": "hybrid_dense_k3", **h}] + ([
             {"name": "hybrid_qclaim", **h, "qmask": "claim"},
-            {"name": "hybrid_qclaim_cfkv", **h, "qmask": "claim", "cf_source": "kv", "cf_only": True},
-            {"name": "hybrid_qclaim_cfrag", **h, "qmask": "claim", "cf_source": "rag", "cf_only": True},
+            {"name": "hybrid_qclaim_cfkv", **h, "qmask": "claim", "cf_source": "kv", "cf_only": True, "p0_from": "hybrid_qclaim"},
+            {"name": "hybrid_qclaim_cfrag", **h, "qmask": "claim", "cf_source": "rag", "cf_only": True, "p0_from": "hybrid_qclaim"},
             {"name": "hybrid_oracle", **h, "oracle": True}] if diag else [])
     raise ValueError(mode)
 
@@ -360,6 +363,7 @@ def main():
     p.add_argument("--out_dir", help="default: --run, or runs/zs_<zero_shot>")
     p.add_argument("--limit", type=int, default=0, help="max samples per split (0 = all)")
     p.add_argument("--amp", default="auto")
+    p.add_argument("--variants", default="", help="regex: evaluate only the variants whose name matches")
     p.add_argument("--diag", action="store_true", help="real-data diagnostics: oracle retrieval ceilings, KV with a dense"
                    " pre-filter, no K-Means variant (its clustering copies the whole KG in fp32: OOM at 20k+ triples)")
     args = p.parse_args()
@@ -401,14 +405,19 @@ def main():
     results = {"train_args": targs, "variants": {}}
     out = Path(args.out_dir or args.run or f"runs/zs_{args.zero_shot}")
     out.mkdir(parents=True, exist_ok=True)
+    split_p = {}  # variant -> {claim: p_true} on ood, reused as the unedited cf pass
     for v in variants_for(mode, args.diag):
+        if args.variants and not re.search(args.variants, v["name"]):
+            continue
         res, confs, preds = {"ood": {}}, {}, {}
         model.qmask = v.get("qmask", "all")
         for name, samples in ({} if v.get("cf_only") else splits).items():
             res[name], confs[name], pr = run_split(model, samples, v, memory, retrievers, device, dt)
             if name == "ood":
                 preds = {x["i"]: x for x in pr}
-        cf = counterfactual(model, splits["ood"], v, memory, retrievers, triples, device, dt)
+                split_p[v["name"]] = {x["i"]: x["p"] for x in pr}
+        cf = counterfactual(model, splits["ood"], v, memory, retrievers, triples, device, dt,
+                            split_p.get(v.get("p0_from", v["name"])))
         model.qmask = "all"
         if cf:
             for x in cf.pop("preds"):
