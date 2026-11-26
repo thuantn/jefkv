@@ -76,6 +76,9 @@ class JefKVModel(nn.Module):
         nn.init.zeros_(self.temp.weight)
         nn.init.constant_(self.temp.bias, 0.5413)   # softplus(0.5413) = 1.0: start at Jef's own scale
         self.last_temp: Optional[torch.Tensor] = None
+        # Which tokens score the triples in the selector: "all" (whole sequence, as trained so far) or "claim" (the
+        # claim only): "all" also scores with the RAG context in hybrid, which contains the gold tail (review 26/11/2026).
+        self.qmask = "all"
 
     # ---------- KG ----------
     def set_kg(self, keys, vals, slot_mask, query_mask=None):
@@ -114,14 +117,22 @@ class JefKVModel(nn.Module):
             q = Question("noul", s["question"], {"false": s["options"]["false"], "true": s["options"]["true"]})
             reqs.append(Request(state, {"q": q}))
         dev = next(self.parameters()).device
-        return pack(reqs, self.tok, self.max_len).to(dev)
+        packed = pack(reqs, self.tok, self.max_len).to(dev)
+        # Claim tokens: the last len(claim) tokens before the first <eos> (pack: <bos> state <eos> question ...).
+        ids, cm = packed.input_ids, torch.zeros_like(packed.attention_mask, dtype=torch.bool)
+        for i, s in enumerate(samples):
+            e = int((ids[i] == self.tok.eos_token_id).nonzero()[0, 0])
+            n = len(self.tok(s["state"], add_special_tokens=False).input_ids)
+            cm[i, max(1, e - n):e] = True
+        packed.claim_mask = cm
+        return packed
 
     def forward(self, packed, kg=None):
         """Returns (logits [B,2], per-layer {layer: [B,M]} retrieval logits (grad), per-layer post-softmax
         attention per triple (no grad, for ACC@k)). Both dicts are empty without a KG."""
         if kg is not None and self.kg_modules:
             keys, vals, slot_mask = kg
-            self.set_kg(keys, vals, slot_mask, packed.attention_mask.bool())
+            self.set_kg(keys, vals, slot_mask, packed.claim_mask if self.qmask == "claim" else packed.attention_mask.bool())
         try:
             logits = self.jef(packed).float()
             feats, triple_logits, triple_attn = [], {}, {}

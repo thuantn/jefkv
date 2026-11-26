@@ -152,11 +152,19 @@ class AtlasKVModernBertAttention(nn.Module):
             # Attention spread over all ~161K slots of the 10K test KG let almost no value of the right
             # triple through (gate run 4: retrieval 95%, decisions 64% vs trained RAG 78%), so every
             # KV layer, this one included, attends only to the top-k triples of this case.
+            nat = trip.detach().topk(min(self.select_k, M), dim=-1)          # natural routing [B,k]
             top = self.route.get("force")  # eval-only oracle routing (scripts/eval.py): given triple ids [B,k]
+            raw = nat.values if top is None else trip.detach().gather(1, top)
             if top is None:
-                top = trip.detach().topk(min(self.select_k, M), dim=-1).indices   # [B,k]
-            z = trip.detach().gather(1, top)                                  # [B,k]
-            z = (z - z.mean(-1, keepdim=True)) / z.std(-1, keepdim=True).clamp(min=1e-4) if z.shape[1] > 1 else z * 0
+                top = nat.indices
+            else:  # the first force_gold ids are gold: score them as the natural top-1 (an ideal selector ranks them
+                raw = raw.clone()  # first), else their low layer-3 score gives a negative prior (review 26/11/2026)
+                raw[:, : self.route.get("force_gold", 0)] = nat.values[:, :1]
+            # z over the natural top-k's statistics, so forcing gold in does not shift the other triples' priors
+            if raw.shape[1] > 1:
+                z = (raw - nat.values.mean(-1, keepdim=True)) / nat.values.std(-1, keepdim=True).clamp(min=1e-4)
+            else:
+                z = raw * 0
             self.route.update(idx=top, z=z)
             keep = torch.zeros(B, M, dtype=torch.bool, device=trip.device).scatter_(1, top, True)
             keep = keep.unsqueeze(-1) & slot_mask                             # [B,M,S]

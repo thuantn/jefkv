@@ -42,37 +42,47 @@ def gold_set(s):
     return set(g[:1]) if s["label"] else set(g)
 
 
+def pass_gold(s, label):
+    """Gold ids that decide one pass of a claim (the cf swapped pass has the flipped label), decisive one first."""
+    g = list(s.get("gold_idx") or [])
+    return g[:1] if label else g
+
+
 def sel_layer(model):
     return next((i for i, m in model.kg_modules.items() if m.select_k), None)
 
 
-def edited_search(r, query, k, gi, t):
-    """Retrieve as if KG row gi had been edited to triple t AND re-indexed (what a real KG edit does to RAG)."""
-    if isinstance(r, DenseRetriever):  # the edited row's score only (embeddings are inference tensors: no in-place edit)
+def edited_search(r, query, k, gis, t):
+    """Retrieve as if KG rows gis (one fact, duplicates included) had been edited to triple t AND re-indexed."""
+    if isinstance(r, DenseRetriever):  # the edited rows' scores only (embeddings are inference tensors: no in-place edit)
         enc = lambda x: r.model.encode(x, convert_to_tensor=True, normalize_embeddings=True, show_progress_bar=False)  # noqa: E731
         q = enc([query])
         scores = (q @ r.emb.T)[0].clone()
-        scores[gi] = (q @ enc([triple_text(t)]).to(q.dtype).T)[0, 0]
+        scores[gis] = (q @ enc([triple_text(t)]).to(q.dtype).T)[0, 0]
         return scores.topk(min(k, len(r.triples))).indices.tolist()
-    from rank_bm25 import BM25Okapi
+    from rank_bm25 import BM25Okapi  # ponytail: rebuilt per claim (slow at 50k triples); incremental BM25 if it matters
     docs = list(r.docs)
-    docs[gi] = _TOK.findall(triple_text(t).lower())
+    for gi in gis:
+        docs[gi] = _TOK.findall(triple_text(t).lower())
     scores = torch.tensor(BM25Okapi(docs).get_scores(_TOK.findall(query.lower())))
     return scores.topk(min(k, len(docs))).indices.tolist()
 
 
-def rag_ids(s, variant, r, edit=None):
-    """Retrieved triple ids; oracle = the case's gold triples first (retrieval ceiling for the text reader)."""
+def rag_ids(s, variant, r, edit=None, gold=None):
+    """Retrieved triple ids; oracle = the pass's gold triples first (retrieval ceiling for the text reader)."""
     k = variant["k"]
     ids = edited_search(r, s["state"], k, *edit) if edit else r.search(s["state"], k)[0]
     if variant.get("oracle"):
-        gold = list(s["gold_idx"])
         ids = (gold + [i for i in ids if i not in gold])[:k]
     return list(ids)
 
 
-def kv_input(s, variant, memory, retrievers, edit=None):
-    """(kg tensors, candidate ids or None) for the KV variants; prefilter = RAG's dense retriever picks the candidates."""
+def kv_input(s, variant, memory, retrievers, edit=None, gold=None):
+    """(kg tensors, candidate ids or None) for the KV variants; prefilter = RAG's dense retriever picks the candidates;
+    gold = the KV holds only the pass's gold triples (reader ceiling without distractors)."""
+    if variant.get("kv") == "gold":
+        cand = torch.tensor(gold, device=memory.keys.device)
+        return memory.subset(cand), cand
     if variant.get("kv") == "full":
         return (memory.keys, memory.vals, memory.slot_mask), None
     if variant.get("kv") == "prefilter":
@@ -97,14 +107,16 @@ def local(ids, cand):  # global triple ids -> positions in the candidate subset 
 
 def run_model(model, packed, kg, device, dt, force=None):
     i = sel_layer(model)
-    if force is not None:
-        model.kg_modules[i].route["force"] = force
+    if force is not None:  # (ids [1,k], number of leading gold ids)
+        force, n_gold = force
+        model.kg_modules[i].route.update(force=force, force_gold=n_gold)
     try:
         with torch.autocast(device_type=device, dtype=dt, enabled=(dt != torch.float32)):
             return model(packed, kg)
     finally:
         if force is not None:
             model.kg_modules[i].route.pop("force", None)
+            model.kg_modules[i].route.pop("force_gold", None)
 
 
 def oracle_force(model, packed, kg, gold_local, device, dt):
@@ -114,7 +126,7 @@ def oracle_force(model, packed, kg, gold_local, device, dt):
     k = model.kg_modules[i].select_k
     order = sl[i][0].topk(min(sl[i].shape[-1], k + len(gold_local))).indices.tolist()
     ids = (list(gold_local) + [x for x in order if x not in gold_local])[:k]
-    return torch.tensor([ids], device=sl[i].device)
+    return torch.tensor([ids], device=sl[i].device), min(len(gold_local), k)
 
 
 @torch.no_grad()
@@ -122,26 +134,29 @@ def run_split(model, samples, variant, memory, retrievers, device, dt):
     model.eval()
     probs, lat = [], []
     hits = {i: {"acc1": [], "acc5": [], "score5": []} for i in model.kg_modules}
-    rec = []  # (label, {k: gold among the selector's / retriever's top k})
-    for s in tqdm(samples, desc=variant["name"], leave=False):
+    rec, rec_rag, preds = [], [], []  # recall: (label, {k: gold among the selector's / retriever's top k})
+    for si, s in enumerate(tqdm(samples, desc=variant["name"], leave=False)):
         if device == "cuda":
             torch.cuda.synchronize()
         t0 = time.perf_counter()
-        ctx, force = None, None
-        ids = None
+        ctx, force, ids, t_or = None, None, None, 0.0
+        gold = pass_gold(s, s["label"])
         if variant.get("retriever"):
             r = retrievers[variant["retriever"]]
-            ids = rag_ids(s, variant, r)
+            ids = rag_ids(s, variant, r, gold=gold)
             ctx = [" ".join(triple_text(r.triples[i]) for i in ids)]
-        kg, cand = kv_input(s, variant, memory, retrievers)
+        kg, cand = kv_input(s, variant, memory, retrievers, gold=gold)
         packed = model.batch([s], ctx)
-        if variant.get("oracle") and kg is not None:
-            force = oracle_force(model, packed, kg, local(s["gold_idx"], cand), device, dt)
+        if variant.get("oracle") and kg is not None:  # its extra forward pass is not part of the method's latency
+            t1 = time.perf_counter()
+            force = oracle_force(model, packed, kg, local(gold, cand), device, dt)
+            t_or = time.perf_counter() - t1
         logits, sl, tl = run_model(model, packed, kg, device, dt, force)  # tl: post-softmax attention per triple; sl: scores
         p_true = F.softmax(logits.float(), -1)[0, 1].item()
         if device == "cuda":
             torch.cuda.synchronize()
-        lat.append((time.perf_counter() - t0) * 1000)
+        lat.append((time.perf_counter() - t0 - t_or) * 1000)
+        pr = {"i": si, "y": s["label"], "p": round(p_true, 5)}
         probs.append(p_true)
 
         if tl and s["gold_idx"]:
@@ -155,14 +170,17 @@ def run_split(model, samples, variant, memory, retrievers, device, dt):
                 hits[i]["acc5"].append(float(gold in top5))
                 hits[i]["score5"].append(float(gold in sl[i][0].topk(min(5, x.shape[-1])).indices.tolist()))
         gs = gold_set(s) if s.get("gold_idx") and "cf_tail" in s else set()  # real-data sets (FactKG) only
-        if gs and not variant.get("oracle"):
+        if gs and not variant.get("oracle") and variant.get("kv") != "gold":
             i = sel_layer(model)
             if sl and i in sl:  # KV: the selector's ranking over its candidates (prefilter misses count as misses)
                 g = set(local(gs, cand))
                 order = sl[i][0].topk(min(16, sl[i].shape[-1])).indices.tolist()
                 rec.append((s["label"], {k: float(bool(g & set(order[:k]))) for k in (1, 5, 16)}))
-            elif ids is not None:  # RAG: the retrieved rows
-                rec.append((s["label"], {variant["k"]: float(bool(gs & set(ids)))}))
+                pr["kv_hit16"] = bool(g & set(order))
+            if ids is not None:  # RAG: the retrieved rows (hybrid logs both)
+                rec_rag.append((s["label"], {variant["k"]: float(bool(gs & set(ids)))}))
+                pr["rag_hit"] = bool(gs & set(ids))
+        preds.append(pr)
 
     n_nan = sum(p != p for p in probs)
     probs = [0.5 if p != p else p for p in probs]  # NaN = no answer; counted, never crashes a long run
@@ -185,14 +203,18 @@ def run_split(model, samples, variant, memory, retrievers, device, dt):
         out["retrieval"] = {str(i): {"acc@1": round(100 * float(np.mean(h["acc1"])), 2),
                                      "acc@5": round(100 * float(np.mean(h["acc5"])), 2),
                                      "score_acc@5": round(100 * float(np.mean(h["score5"])), 2)} for i, h in hits.items()}
-    if rec:  # recall of the decisive gold triple(s): True claims need gold_idx[0], False ones any real tail
-        ks = sorted(rec[0][1])
-        out["recall"] = {f"@{k}": round(100 * float(np.mean([h[k] for _, h in rec])), 2) for k in ks}
+    if not rec:  # RAG only: its recall is "recall"; hybrid: "recall" = KV selector, "recall_rag" = retriever
+        rec, rec_rag = rec_rag, []
+    for key, rr in (("recall", rec), ("recall_rag", rec_rag)):  # True claims need gold_idx[0], False ones any real tail
+        if not rr:
+            continue
+        ks = sorted(rr[0][1])
+        out[key] = {f"@{k}": round(100 * float(np.mean([h[k] for _, h in rr])), 2) for k in ks}
         for lab, nm in ((1, "true"), (0, "false")):
-            sub = [h for y, h in rec if y == lab]
+            sub = [h for y, h in rr if y == lab]
             if sub:
-                out["recall"].update({f"{nm}@{k}": round(100 * float(np.mean([h[k] for h in sub])), 2) for k in ks})
-    return out, conf
+                out[key].update({f"{nm}@{k}": round(100 * float(np.mean([h[k] for h in sub])), 2) for k in ks})
+    return out, conf, preds
 
 
 def _set_row(memory, gi, t):
@@ -230,8 +252,12 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
     model.eval()
     both = flips = n = 0
     by_label = {0: [], 1: []}  # pair correct, per original label (True claims vs False claims)
-    hits = []  # was the gold triple among the retrieved / pre-filtered ones (else the edit cannot reach the model)
-    for s in tqdm(samples, desc=variant["name"] + "/cf", leave=False):
+    hits, preds = [], []  # hits: was the edited gold row retrieved / pre-filtered (else the edit cannot reach the model)
+    src = variant.get("cf_source", "both")  # hybrid: edit the KG for the KV path only, the text path only, or both
+    rows = {}  # one fact may sit in several identical rows (old converter): edit them all
+    for j, t in enumerate(triples):
+        rows.setdefault((t["head"].lower(), t["relation"], t["tail"].lower()), []).append(j)
+    for si, s in enumerate(tqdm(samples, desc=variant["name"] + "/cf", leave=False)):
         nums = re.findall(r"\d+", s["state"])
         if not s["gold_idx"] or not (nums or "cf_tail" in s):
             continue
@@ -239,39 +265,48 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
         real = "cf_tail" in s
         if real:  # real data (FactKG): the converter picked a tail that flips the label
             swapped = dict(triples[gi], tail=s["cf_tail"])
+            g = triples[gi]
+            gis = rows[(g["head"].lower(), g["relation"], g["tail"].lower())]
         else:
             x = int(nums[-1])
             d = max(1, round(0.1 * x))
             swapped = dict(triples[gi], tail=str(x - d) if s["label"] else str(x + d))
-        preds = []
+            gis = [gi]
+        pp = []
         for t, label in ((triples[gi], s["label"]), (swapped, 1 - s["label"])):
-            edit = (gi, t) if (t is swapped and real) else None
-            ctx, kg, cand, undo, force = None, None, None, None, None
+            sw = t is swapped
+            edit = (gis, t) if (sw and real) else None
+            gold = pass_gold(s, label)
+            ctx, kg, cand, undo, force = None, None, None, [], None
             if variant.get("retriever"):
                 r = retrievers[variant["retriever"]]
-                ids = rag_ids(s, variant, r, edit)
-                ctx = [" ".join(triple_text(t if i == gi else r.triples[i]) for i in ids)]
-                if t is swapped:
+                txt_edit = sw and src != "kv"
+                ids = rag_ids(s, variant, r, edit if txt_edit else None, gold)
+                ctx = [" ".join(triple_text(t if (txt_edit and i in gis) else r.triples[i]) for i in ids)]
+                if sw and txt_edit:
                     hits.append(gi in ids)
             try:
-                if variant.get("kv") in ("full", "prefilter"):
-                    undo = _set_row(memory, gi, t) if t is swapped else None
-                    kg, cand = kv_input(s, variant, memory, retrievers, edit)
-                    if cand is not None and t is swapped and not variant.get("retriever"):
+                if variant.get("kv") in ("full", "prefilter", "gold"):
+                    if sw and src != "rag":
+                        undo = [_set_row(memory, j, t) for j in gis]
+                    kg, cand = kv_input(s, variant, memory, retrievers, edit, gold)
+                    if cand is not None and sw and not variant.get("retriever") and variant.get("kv") == "prefilter":
                         hits.append(bool((cand == gi).any()))
                 packed = model.batch([s], ctx)
                 if variant.get("oracle") and kg is not None:
-                    force = oracle_force(model, packed, kg, local(s["gold_idx"], cand), device, dt)
+                    force = oracle_force(model, packed, kg, local(gold, cand), device, dt)
                 logits, _, _ = run_model(model, packed, kg, device, dt, force)
             finally:
-                if undo:
-                    undo()
-            pred = int(logits[0, 1] > logits[0, 0])
-            preds.append((pred, pred == label))
+                for u in reversed(undo):
+                    u()
+            pr = F.softmax(logits.float(), -1)[0, 1].item()
+            pred = int(pr > 0.5)
+            pp.append((pred, pred == label, round(pr, 5)))
         n += 1
-        both += preds[0][1] and preds[1][1]
-        flips += preds[0][0] != preds[1][0]
-        by_label[s["label"]].append(preds[0][1] and preds[1][1])
+        both += pp[0][1] and pp[1][1]
+        flips += pp[0][0] != pp[1][0]
+        by_label[s["label"]].append(pp[0][1] and pp[1][1])
+        preds.append({"i": si, "y": s["label"], "p0": pp[0][2], "p1": pp[1][2], "pair": bool(pp[0][1] and pp[1][1])})
     if not n:
         return None
     out = {"pair_acc": round(100 * both / n, 2), "flip_rate": round(100 * flips / n, 2), "n": n,
@@ -281,6 +316,7 @@ def counterfactual(model, samples, variant, memory, retrievers, triples, device,
             out[name] = round(100 * float(np.mean(by_label[lab])), 2)
     if hits:
         out["gold_retrieved"] = round(100 * float(np.mean(hits)), 2)
+    out["preds"] = preds  # popped by main into preds_<variant>.jsonl
     return out
 
 
@@ -294,8 +330,10 @@ def variants_for(mode, diag=False):
                 {"name": "jef_rag_bm25_k3", "retriever": "bm25", "k": 3}] + \
                ([{"name": "jef_rag_dense_k3_oracle", "retriever": "dense", "k": 3, "oracle": True}] if diag else [])
     if mode == "kv":
-        if diag:
-            return [{"name": "kv_full", "kv": "full"}, {"name": "kv_oracle", "kv": "full", "oracle": True},
+        if diag:  # qclaim: the selector scores with the claim tokens only; goldonly: the KV holds only the gold triples
+            return [{"name": "kv_full", "kv": "full"}, {"name": "kv_qclaim", "kv": "full", "qmask": "claim"},
+                    {"name": "kv_oracle", "kv": "full", "oracle": True},
+                    {"name": "kv_oracle_goldonly", "kv": "gold"},
                     {"name": "kv_prefilter64", "kv": "prefilter", "k_pre": 64}]
         return [{"name": "kv_full", "kv": "full"}, {"name": "kv_pruned", "kv": "pruned", "top_clusters": 8}]
     if mode == "rag":
@@ -303,8 +341,13 @@ def variants_for(mode, diag=False):
                [{"name": "rag_bm25_k3", "retriever": "bm25", "k": 3}] + \
                ([{"name": "rag_dense_k3_oracle", "retriever": "dense", "k": 3, "oracle": True}] if diag else [])
     if mode == "hybrid":
-        return [{"name": "hybrid_dense_k3", "retriever": "dense", "k": 3, "kv": "full"}] + \
-               ([{"name": "hybrid_oracle", "retriever": "dense", "k": 3, "kv": "full", "oracle": True}] if diag else [])
+        h = {"retriever": "dense", "k": 3, "kv": "full"}
+        # cf_source: the cf edit reaches only the KV path (kv) or only the text path (rag); cf_only: accuracy unchanged
+        return [{"name": "hybrid_dense_k3", **h}] + ([
+            {"name": "hybrid_qclaim", **h, "qmask": "claim"},
+            {"name": "hybrid_qclaim_cfkv", **h, "qmask": "claim", "cf_source": "kv", "cf_only": True},
+            {"name": "hybrid_qclaim_cfrag", **h, "qmask": "claim", "cf_source": "rag", "cf_only": True},
+            {"name": "hybrid_oracle", **h, "oracle": True}] if diag else [])
     raise ValueError(mode)
 
 
@@ -355,13 +398,24 @@ def main():
         retrievers = {"dense": DenseRetriever(triples, device)}
 
     results = {"train_args": targs, "variants": {}}
+    out = Path(args.out_dir or args.run or f"runs/zs_{args.zero_shot}")
+    out.mkdir(parents=True, exist_ok=True)
     for v in variants_for(mode, args.diag):
-        res, confs = {}, {}
-        for name, samples in splits.items():
-            res[name], confs[name] = run_split(model, samples, v, memory, retrievers, device, dt)
+        res, confs, preds = {"ood": {}}, {}, {}
+        model.qmask = v.get("qmask", "all")
+        for name, samples in ({} if v.get("cf_only") else splits).items():
+            res[name], confs[name], pr = run_split(model, samples, v, memory, retrievers, device, dt)
+            if name == "ood":
+                preds = {x["i"]: x for x in pr}
         cf = counterfactual(model, splits["ood"], v, memory, retrievers, triples, device, dt)
+        model.qmask = "all"
         if cf:
+            for x in cf.pop("preds"):
+                preds.setdefault(x["i"], {"i": x["i"], "y": x["y"]}).update(cf_p0=x["p0"], cf_p1=x["p1"], cf_pair=x["pair"])
             res["ood"]["cf"] = cf
+        if preds:  # per claim (ood split): paired bootstrap and subsets (RAG miss, unseen head) without re-running
+            (out / f"preds_{v['name']}.jsonl").write_text("".join(json.dumps(preds[i]) + "\n" for i in sorted(preds)),
+                                                         encoding="utf-8")
         if "trap" in confs:
             y = [1] * len(confs["ood"]) + [0] * len(confs["trap"])
             res["abstain_auroc"] = round(float(roc_auc_score(y, confs["ood"] + confs["trap"])), 4)
@@ -369,8 +423,6 @@ def main():
         print(v["name"], json.dumps({k: {m: x for m, x in r.items() if m != "retrieval"} if isinstance(r, dict) else r
                                      for k, r in res.items()}))
 
-    out = Path(args.out_dir or args.run or f"runs/zs_{args.zero_shot}")
-    out.mkdir(parents=True, exist_ok=True)
     (out / "eval.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
     print(f"wrote {out / 'eval.json'}")
 
