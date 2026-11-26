@@ -97,3 +97,21 @@ Rollback restarts and collapses are counted and reported per run; no seed is dro
 The hybrid with a meaningless KV (values shuffled) matches the real one, and a RAG with more trainable layers matches
 both. The hybrid's lead over the registered RAG baseline is adapter capacity, not KG knowledge read from the KV.
 No rollback fired in these six runs.
+
+## T: tail truncation (registered 26/11/2026, before running)
+Found from the per-claim predictions: KV texts are cut at `max_slots` = 16 tokens (bos/eos included) and the tail is
+last, so 21% of test KG triples and 674 / 2,327 test claims (a gold triple cut) lose the deciding tail in both key and
+value. RAG puts the full sentence in its input. On those 674 claims vs the other 1,653 (3 seeds pooled):
+`kv_oracle_goldonly` 82.0 / 30.7 vs 89.1 / 51.4, `kv_oracle` 84.3 / 30.4 vs 89.6 / 45.8, RAG6 95.9 / 56.4 vs 96.0 / 62.4
+(so part of the gap is claim difficulty, not truncation; both reviewers estimate ~3-7 acc / ~14 cf from the cut itself).
+Even with no cut and no routing error, frozen KV (89.1 / 51.4) stays below RAG2 on the same claims (92.2 / 52.4).
+
+- **T1 (eval only, $0 training):** the 3 existing `fk_kv_jef` adapters evaluated with the memory built at 32 slots
+  (`eval.py --max_slots 32`; the KG projections do not depend on the slot count), variants `kv_full`, `kv_oracle`,
+  `kv_oracle_goldonly`. Rules (3-seed means, split cut / full as above): truncation is **confirmed** if
+  `kv_oracle_goldonly` on the cut claims gains >= 5 cf; T1 is **not** a test of KV vs RAG (frozen KV is already below
+  RAG2 at its ceiling, see above), so the FactKG verdict stays negative whatever T1 shows.
+- **T2 (only if T1 confirms):** `kv_jef --unfreeze_top 6 --max_slots 32`, 1 seed, vs RAG6 (same trainable encoder layers;
+  KV also has its 11.2M adapter, so a KV win would still be confounded, a loss is decisive). KV continues only if its
+  `kv_oracle_goldonly` cf on ALL >= 60 (RAG6 60.7, seed spread of frozen gold-only cf was 11.5); < 55 = stop; 55-60 =
+  2 more seeds before deciding.

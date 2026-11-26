@@ -363,6 +363,7 @@ def main():
     p.add_argument("--out_dir", help="default: --run, or runs/zs_<zero_shot>")
     p.add_argument("--limit", type=int, default=0, help="max samples per split (0 = all)")
     p.add_argument("--amp", default="auto")
+    p.add_argument("--max_slots", type=int, default=0, help="tokens per KV triple text (0 = the value the adapter was trained with)")
     p.add_argument("--variants", default="", help="regex: evaluate only the variants whose name matches")
     p.add_argument("--diag", action="store_true", help="real-data diagnostics: oracle retrieval ceilings, KV with a dense"
                    " pre-filter, no K-Means variant (its clustering copies the whole KG in fp32: OOM at 20k+ triples)")
@@ -391,7 +392,7 @@ def main():
 
     memory = None
     if mode in ("kv", "hybrid"):
-        memory = build_memory(model, triples, targs["kv_encoder"], device, dt if device == "cuda" else torch.float32, targs["max_slots"])
+        memory = build_memory(model, triples, targs["kv_encoder"], device, dt if device == "cuda" else torch.float32, args.max_slots or targs["max_slots"])
         if targs["random_kv"]:
             memory.shuffle_values(targs["seed"])
         if not args.diag:

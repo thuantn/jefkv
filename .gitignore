@@ -27,3 +27,4 @@ runs_colab/
 runs_bench/
 runs_vast/
 data/factkg/
+runs_local/
