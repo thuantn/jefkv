@@ -213,3 +213,14 @@ probabilities agree to ~1e-5 on a 40-claim check). cf = `cf.pair_acc` over the 2
   (seeds pooled), BM25 k=3, the surer-model gate.
 Caveats stated now: the reader was trained on dense-retrieved text (BM25 at test time cost it 1 point acc), which can
 only work against RRF; no validation split; one dataset.
+
+### Outcome of R (27/11/2026, Kaggle CPU, `results/factkg_rrf`): no clear difference
+| seed | dense k=3 (acc / cf / recall@3) | BM25 k=3 | RRF k=3 | dacc | dcf |
+|---|---|---|---|---|---|
+| 0 | 96.13 / 60.94 / 87.5 | 95.02 / 61.41 / 73.7 | 95.62 / 61.02 / 83.6 | -0.51 | +0.08 |
+| 1 | 95.79 / 61.07 / 87.5 | 94.97 / 61.19 / 73.7 | 95.92 / 60.64 / 83.6 | +0.13 | -0.43 |
+| 2 | 96.05 / 59.99 / 87.5 | 94.71 / 60.08 / 73.7 | 95.44 / 59.95 / 83.6 | -0.61 | -0.04 |
+Mean dcf -0.13 (paired bootstrap over claims, seeds pooled: 95% CI -1.22 to +0.95), mean dacc -0.33: neither the
+"helps" nor the "hurts" rule fires, so **no clear difference**. RRF's recall@3 (83.6) is below dense alone (87.5): with
+k = 3, BM25's weaker ranking pulls dense hits out. The complementarity of the two RAGs (8.3% followed edits, +0.3 acc
+for the surer-model gate) lives in the two trained readers' predictions, not in the retrieved text.
