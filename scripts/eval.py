@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 
-from jefkv.memory import _TOK, BM25Retriever, DenseRetriever, kv_text, triple_text
+from jefkv.memory import _TOK, BM25Retriever, DenseRetriever, RRFRetriever, kv_text, triple_text
 from jefkv.model import JefKVModel
 from scripts.train import amp_dtype, build_memory
 
@@ -55,6 +55,8 @@ def sel_layer(model):
 
 def edited_search(r, query, k, gis, t):
     """Retrieve as if KG rows gis (one fact, duplicates included) had been edited to triple t AND re-indexed."""
+    if isinstance(r, RRFRetriever):  # both rankings re-indexed, then fused
+        return r.fuse(edited_search(r.dense, query, r.depth, gis, t), edited_search(r.bm25, query, r.depth, gis, t))[:k]
     if isinstance(r, DenseRetriever):  # the edited rows' scores only (embeddings are inference tensors: no in-place edit)
         enc = lambda x: r.model.encode(x, convert_to_tensor=True, normalize_embeddings=True, show_progress_bar=False)  # noqa: E731
         q = enc([query])
@@ -344,7 +346,7 @@ def variants_for(mode, diag=False):
         return [{"name": "kv_full", "kv": "full"}, {"name": "kv_pruned", "kv": "pruned", "top_clusters": 8}]
     if mode == "rag":
         return [{"name": f"rag_dense_k{k}", "retriever": "dense", "k": k} for k in (1, 3, 10)] + \
-               [{"name": "rag_bm25_k3", "retriever": "bm25", "k": 3}] + \
+               [{"name": "rag_bm25_k3", "retriever": "bm25", "k": 3}, {"name": "rag_rrf_k3", "retriever": "rrf", "k": 3}] + \
                ([{"name": "rag_dense_k3_oracle", "retriever": "dense", "k": 3, "oracle": True}] if diag else [])
     if mode == "hybrid":
         h = {"retriever": "dense", "k": 3, "kv": "full"}
@@ -402,6 +404,7 @@ def main():
     retrievers = {}
     if mode in ("rag", "rag_zs", "hybrid"):
         retrievers = {"dense": DenseRetriever(triples, device), "bm25": BM25Retriever(triples)}
+        retrievers["rrf"] = RRFRetriever(retrievers["dense"], retrievers["bm25"])
     elif mode == "kv" and args.diag:  # the dense pre-filter variant
         retrievers = {"dense": DenseRetriever(triples, device)}
 

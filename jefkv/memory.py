@@ -166,3 +166,21 @@ class BM25Retriever:
         scores = torch.tensor(self.bm25.get_scores(_TOK.findall(query.lower())))
         s, i = scores.topk(min(k, len(self.triples)))
         return i.tolist(), s.tolist()
+
+
+class RRFRetriever:
+    """Reciprocal rank fusion (Cormack et al. 2009) of dense + BM25: score = sum 1/(c + rank) over each one's top `depth`."""
+
+    def __init__(self, dense, bm25, depth: int = 50, c: int = 60):
+        self.dense, self.bm25, self.depth, self.c, self.triples = dense, bm25, depth, c, dense.triples
+
+    def fuse(self, *rankings) -> List[int]:
+        sc = {}
+        for ids in rankings:
+            for rank, i in enumerate(ids, 1):
+                sc[i] = sc.get(i, 0.0) + 1.0 / (self.c + rank)
+        return sorted(sc, key=lambda i: (-sc[i], i))
+
+    def search(self, query: str, k: int) -> Tuple[List[int], List[float]]:
+        ids = self.fuse(self.dense.search(query, self.depth)[0], self.bm25.search(query, self.depth)[0])[:k]
+        return ids, [0.0] * len(ids)  # fused scores are not comparable to either retriever's; callers use the ids

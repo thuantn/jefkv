@@ -193,3 +193,23 @@ its 79.1 floor for the 19-layer run). Registered reading: *more training helps K
 budget*, by 12-14 cf with the right facts only and ~40 cf with natural routing. Training all 19 layers adds nothing over
 6 at 9,000 steps. Next steps here would need new ideas (selector, hard negatives), not more steps: the KV line on FactKG
 stops at this verdict.
+
+## R: retriever fusion for RAG (registered 27/11/2026, before running)
+Why: per claim, a BM25 RAG6 follows 8.3% of the edits a dense RAG6 misses (KV or a second dense seed: 3.6-4.2%,
+`scripts/complement.py`), and picking the surer of the two models gives 96.3 vs 96.0. Dense k=3 has gold recall@3 87.5%
+(True 97.7 / False 75.2), BM25 73.7%. Does fusing the two retrievers' rankings into one top-3 help the same reader?
+Run (eval only, the existing `fk_rag_unf6_s{0,1,2}` adapters, trained with dense k=3; local CPU): variant `rag_rrf_k3`
+= reciprocal rank fusion (Cormack et al. 2009) of the dense and BM25 top-50, score sum 1/(60 + rank), top 3; c = 60 and
+depth 50 are the usual defaults, fixed now and not tuned. The cf edit re-indexes both retrievers before fusing.
+Compared with `rag_dense_k3` of the same adapter (96.0 / cf 60.7, recall@3 87.5); BM25 k=3 and the surer-model gate
+are reported, not decided on.
+Revised before running after two reviews (same day): the first rule was asymmetric (AND for helps, OR for hurts) and
+asked +0.5 acc, above what even the surer-model gate reaches (+0.3). Now: differences are paired, RRF minus dense on the
+same adapter seed (dense = that adapter's earlier `rag_dense_k3` row, RTX 3090 fp16; RRF runs on CPU fp32, per-claim
+probabilities agree to ~1e-5 on a 40-claim check). cf = `cf.pair_acc` over the 2,327 test claims; acc = accuracy.
+- **RRF helps** if mean dcf >= +2.0 with dcf > 0 on every seed, and mean dacc > -0.3 (no accuracy cost).
+- **RRF hurts** if mean dcf <= -2.0 with dcf < 0 on every seed, or mean dacc <= -0.5 with dacc < 0 on every seed.
+- Otherwise **no clear difference**. Reported, not decided on: recall@3, a paired bootstrap 95% CI of dcf over claims
+  (seeds pooled), BM25 k=3, the surer-model gate.
+Caveats stated now: the reader was trained on dense-retrieved text (BM25 at test time cost it 1 point acc), which can
+only work against RRF; no validation split; one dataset.
