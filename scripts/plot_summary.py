@@ -1,6 +1,6 @@
 """README figures (light + dark SVG): accuracy and counterfactual pair accuracy.
 results_*: synthetic benchmark, numbers from README "Results" (rb_check: the recommended recipe, rollback on collapse,
-every seed counted). factkg_*: FactKG test, 3 seeds, numbers from docs/PREREG_factkg.md (S0 + post-hoc checks).
+every seed counted; synth_cap: the capacity checks). factkg_*: FactKG test, 3 seeds, numbers from docs/PREREG_factkg.md (S0 + post-hoc checks).
   python scripts/plot_summary.py docs/"""
 import sys
 import matplotlib
@@ -12,14 +12,17 @@ FIGS = {
     "results": dict(
         rows=[
             ("Hybrid: RAG text + KV memory", "kv", (97.2, 0.7), (94.3, 1.3)),
+            ("Hybrid, KV values shuffled", "ctrl", (96.1, 0.4), (92.8, 1.0)),
+            ("RAG, 6 trainable layers (BM25, k=3)", "rag", (89.4, 1.8), (71.7, 3.9)),
+            ("KV memory + 6 trainable layers", "kv", (86.0, 0.5), (61.2, 1.2)),
             ("KV memory, frozen Jef (JefKV)", "kv", (85.2, 0.5), (58.9, 2.1)),
-            ("Best RAG (BM25, k=3, no warmup)", "rag", (79.0, 1.0), (44.6, 0.6)),
+            ("RAG, 2 trainable layers (BM25, k=3)", "rag", (79.0, 1.0), (44.6, 0.6)),
             ("RandomKV control (shuffled facts)", "ctrl", (64.4, 1.1), (7.9, 3.2)),
             ("Zero-shot Jef (no knowledge)", "ctrl", (51.9, 0.0), None),
         ],
         acc="Synthetic benchmark: OOD accuracy (%)",
-        note="Mean ± std over seeds, every run counted: KV and hybrid 6, RandomKV 5 (rollback on collapse, RTX 3090), RAG 3 (T4).\n"
-             "RAG trains 2 encoder layers, KV/hybrid an 11.2M adapter: on FactKG that capacity gap explained the hybrid's lead."),
+        note="Mean ± std over seeds, every run counted (3-6). JefKV beats a RAG that trains 2 encoder layers, not one that\n"
+             "trains 6, even when KV trains the same 6; a shuffled KV does as well as the real one inside the hybrid."),
     "factkg": dict(
         rows=[
             ("Hybrid: RAG text + KV memory", "kv", (96.2, 0.4), (61.6, 3.1)),
